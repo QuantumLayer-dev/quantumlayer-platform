@@ -1,4 +1,4 @@
-package providers
+package llmrouter
 
 import (
 	"context"
@@ -6,15 +6,13 @@ import (
 	
 	openai "github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
-	
-	llm "github.com/QuantumLayer-dev/quantumlayer-platform/packages/llm-router"
 )
 
 // OpenAIClient implements the ProviderClient interface for OpenAI
 type OpenAIClient struct {
 	client *openai.Client
 	logger *zap.Logger
-	config *llm.ProviderConfig
+	config *ProviderConfig
 }
 
 // NewOpenAIClient creates a new OpenAI client
@@ -26,7 +24,7 @@ func NewOpenAIClient(apiKey string, logger *zap.Logger) *OpenAIClient {
 }
 
 // Complete sends a completion request to OpenAI
-func (c *OpenAIClient) Complete(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+func (c *OpenAIClient) Complete(ctx context.Context, req *Request) (*Response, error) {
 	// Convert our request to OpenAI format
 	messages := make([]openai.ChatCompletionMessage, len(req.Messages))
 	for i, msg := range req.Messages {
@@ -57,11 +55,11 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.Request) (*llm.Res
 	}
 	
 	// Convert response to our format
-	choices := make([]llm.Choice, len(resp.Choices))
+	choices := make([]Choice, len(resp.Choices))
 	for i, choice := range resp.Choices {
-		choices[i] = llm.Choice{
+		choices[i] = Choice{
 			Index: choice.Index,
-			Message: llm.Message{
+			Message: Message{
 				Role:    choice.Message.Role,
 				Content: choice.Message.Content,
 			},
@@ -69,14 +67,14 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.Request) (*llm.Res
 		}
 	}
 	
-	return &llm.Response{
+	return &Response{
 		ID:       resp.ID,
 		Object:   resp.Object,
 		Created:  resp.Created,
-		Model:    llm.Model(resp.Model),
-		Provider: llm.ProviderOpenAI,
+		Model:    Model(resp.Model),
+		Provider: ProviderOpenAI,
 		Choices:  choices,
-		Usage: llm.Usage{
+		Usage: Usage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
@@ -85,8 +83,8 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.Request) (*llm.Res
 }
 
 // Stream sends a streaming completion request to OpenAI
-func (c *OpenAIClient) Stream(ctx context.Context, req *llm.Request) (<-chan *llm.Response, error) {
-	respChan := make(chan *llm.Response)
+func (c *OpenAIClient) Stream(ctx context.Context, req *Request) (<-chan *Response, error) {
+	respChan := make(chan *Response)
 	
 	go func() {
 		defer close(respChan)
@@ -126,15 +124,15 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *llm.Request) (<-chan *ll
 			
 			// Convert and send response
 			if len(response.Choices) > 0 {
-				resp := &llm.Response{
+				resp := &Response{
 					ID:       response.ID,
 					Object:   response.Object,
 					Created:  response.Created,
-					Model:    llm.Model(response.Model),
-					Provider: llm.ProviderOpenAI,
-					Choices: []llm.Choice{{
+					Model:    Model(response.Model),
+					Provider: ProviderOpenAI,
+					Choices: []Choice{{
 						Index: response.Choices[0].Index,
-						Message: llm.Message{
+						Message: Message{
 							Role:    response.Choices[0].Delta.Role,
 							Content: response.Choices[0].Delta.Content,
 						},
@@ -155,8 +153,8 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *llm.Request) (<-chan *ll
 }
 
 // Name returns the provider name
-func (c *OpenAIClient) Name() llm.Provider {
-	return llm.ProviderOpenAI
+func (c *OpenAIClient) Name() Provider {
+	return ProviderOpenAI
 }
 
 // IsAvailable checks if the provider is available
@@ -166,29 +164,29 @@ func (c *OpenAIClient) IsAvailable() bool {
 }
 
 // GetCapabilities returns provider capabilities
-func (c *OpenAIClient) GetCapabilities() llm.Capabilities {
-	return llm.Capabilities{
+func (c *OpenAIClient) GetCapabilities() Capabilities {
+	return Capabilities{
 		MaxTokens:        128000, // GPT-4 Turbo
 		SupportStreaming: true,
 		SupportFunctions: true,
 		SupportVision:    true,
 		Languages:        []string{"en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh"},
-		Models: []llm.Model{
-			llm.ModelGPT4Turbo,
-			llm.ModelGPT4,
-			llm.ModelGPT35Turbo,
+		Models: []Model{
+			ModelGPT4Turbo,
+			ModelGPT4,
+			ModelGPT35Turbo,
 		},
 	}
 }
 
 // mapModel maps our model enum to OpenAI model string
-func (c *OpenAIClient) mapModel(model llm.Model) string {
+func (c *OpenAIClient) mapModel(model Model) string {
 	switch model {
-	case llm.ModelGPT4Turbo:
+	case ModelGPT4Turbo:
 		return "gpt-4-turbo-preview"
-	case llm.ModelGPT4:
+	case ModelGPT4:
 		return "gpt-4"
-	case llm.ModelGPT35Turbo:
+	case ModelGPT35Turbo:
 		return "gpt-3.5-turbo"
 	default:
 		return "gpt-4-turbo-preview"

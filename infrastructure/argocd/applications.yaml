@@ -1,0 +1,223 @@
+# ArgoCD Application definitions for GitOps-based deployment
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: quantumlayer
+  namespace: argocd
+spec:
+  description: QuantumLayer Platform Project
+  
+  # Source repositories
+  sourceRepos:
+  - https://github.com/QuantumLayer-dev/quantumlayer-platform
+  
+  # Destinations
+  destinations:
+  - namespace: quantumlayer
+    server: https://kubernetes.default.svc
+  - namespace: quantumlayer-staging
+    server: https://kubernetes.default.svc
+  - namespace: quantumlayer-prod
+    server: https://kubernetes.default.svc
+  
+  # Cluster resource whitelist
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  
+  # Namespace resource whitelist
+  namespaceResourceWhitelist:
+  - group: '*'
+    kind: '*'
+  
+  # Roles
+  roles:
+  - name: admin
+    policies:
+    - p, proj:quantumlayer:admin, applications, *, quantumlayer/*, allow
+    groups:
+    - quantumlayer:admins
+  
+  - name: developer
+    policies:
+    - p, proj:quantumlayer:developer, applications, get, quantumlayer/*, allow
+    - p, proj:quantumlayer:developer, applications, sync, quantumlayer/*, allow
+    groups:
+    - quantumlayer:developers
+---
+# Production Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: quantumlayer-prod
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: quantumlayer
+  
+  source:
+    repoURL: https://github.com/QuantumLayer-dev/quantumlayer-platform
+    targetRevision: main
+    path: infrastructure/kubernetes
+    
+    # Kustomize configuration for production
+    kustomize:
+      namePrefix: prod-
+      commonLabels:
+        environment: production
+      images:
+      - name: ghcr.io/quantumlayer-dev/llm-router
+        newTag: stable
+      - name: ghcr.io/quantumlayer-dev/agent-orchestrator
+        newTag: stable
+      patchesStrategicMerge:
+      - |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: llm-router
+        spec:
+          replicas: 5
+      - |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: agent-orchestrator
+        spec:
+          replicas: 3
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: quantumlayer-prod
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  revisionHistoryLimit: 10
+  
+  # Health checks
+  health:
+    progressDeadlineSeconds: 600
+---
+# Staging Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: quantumlayer-staging
+  namespace: argocd
+spec:
+  project: quantumlayer
+  
+  source:
+    repoURL: https://github.com/QuantumLayer-dev/quantumlayer-platform
+    targetRevision: staging
+    path: infrastructure/kubernetes
+    
+    kustomize:
+      namePrefix: staging-
+      commonLabels:
+        environment: staging
+      images:
+      - name: ghcr.io/quantumlayer-dev/llm-router
+        newTag: latest
+      - name: ghcr.io/quantumlayer-dev/agent-orchestrator
+        newTag: latest
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: quantumlayer-staging
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+---
+# Development Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: quantumlayer-dev
+  namespace: argocd
+spec:
+  project: quantumlayer
+  
+  source:
+    repoURL: https://github.com/QuantumLayer-dev/quantumlayer-platform
+    targetRevision: develop
+    path: infrastructure/kubernetes
+    
+    kustomize:
+      namePrefix: dev-
+      commonLabels:
+        environment: development
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: quantumlayer
+  
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+---
+# ApplicationSet for multi-cluster deployment
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: quantumlayer-multicluster
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: prod-us-east-1
+        url: https://k8s-prod-use1.quantumlayer.ai
+        region: us-east-1
+      - cluster: prod-eu-west-1
+        url: https://k8s-prod-euw1.quantumlayer.ai
+        region: eu-west-1
+      - cluster: prod-ap-south-1
+        url: https://k8s-prod-aps1.quantumlayer.ai
+        region: ap-south-1
+  
+  template:
+    metadata:
+      name: '{{cluster}}-quantumlayer'
+    spec:
+      project: quantumlayer
+      source:
+        repoURL: https://github.com/QuantumLayer-dev/quantumlayer-platform
+        targetRevision: main
+        path: infrastructure/kubernetes
+        helm:
+          parameters:
+          - name: region
+            value: '{{region}}'
+      destination:
+        server: '{{url}}'
+        namespace: quantumlayer-prod
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true

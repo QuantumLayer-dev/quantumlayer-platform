@@ -1,8 +1,7 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev
 
 WORKDIR /app
 
@@ -13,21 +12,18 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o parser-service cmd/server/main.go
+# Build the application
+RUN CGO_ENABLED=1 GOOS=linux go build -o parser ./cmd/server/main.go
 
-# Runtime stage
+# Final stage
 FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /root/
+WORKDIR /app
 
-# Copy the binary from builder
-COPY --from=builder /app/parser-service .
+COPY --from=builder /app/parser .
 
-# Expose port
 EXPOSE 8082
 
-# Run the service
-CMD ["./parser-service"]
+ENTRYPOINT ["./parser"]

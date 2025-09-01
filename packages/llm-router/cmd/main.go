@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,26 +12,22 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
-	llmrouter "github.com/QuantumLayer-dev/quantumlayer-platform/packages/llm-router"
 )
 
 func main() {
-	var (
-		port      = flag.String("port", getEnv("PORT", "8080"), "Server port")
-		redisURL  = flag.String("redis", getEnv("REDIS_URL", "redis://localhost:6379"), "Redis URL")
-		logLevel  = flag.String("log-level", getEnv("LOG_LEVEL", "info"), "Log level")
-		env       = flag.String("env", getEnv("ENVIRONMENT", "development"), "Environment")
-	)
-	flag.Parse()
-
 	// Initialize logger
-	logger := initLogger(*logLevel, *env)
+	logger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
 	defer logger.Sync()
 
+	// Get configuration from environment
+	port := getEnv("PORT", "8080")
+	redisURL := getEnv("REDIS_URL", "redis://redis.quantumlayer.svc.cluster.local:6379")
+	
 	// Initialize Redis client
-	opt, err := redis.ParseURL(*redisURL)
+	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
 		logger.Fatal("Failed to parse Redis URL", zap.Error(err))
 	}
@@ -41,77 +38,67 @@ func main() {
 	// Test Redis connection
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		logger.Warn("Redis connection failed, caching disabled", zap.Error(err))
-		redisClient = nil // Disable caching if Redis is not available
+		redisClient = nil
 	} else {
 		logger.Info("Connected to Redis")
 	}
 
-	// Create and start server
-	server := llmrouter.NewServer(*port, logger, redisClient)
-
-	// Handle graceful shutdown
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-		
-		logger.Info("Shutting down LLM Router service...")
-		
-		// Give ongoing requests 10 seconds to complete
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		
-		if redisClient != nil {
-			redisClient.Close()
-		}
-		
-		// Wait for context or force exit
-		<-ctx.Done()
-		os.Exit(0)
-	}()
-
-	// Start the server
-	logger.Info("Starting LLM Router service", 
-		zap.String("port", *port),
-		zap.String("environment", *env),
-	)
+	// Create HTTP mux
+	mux := http.NewServeMux()
 	
-	if err := server.Start(); err != nil {
-		logger.Fatal("Failed to start server", zap.Error(err))
+	// Health endpoint
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status":"healthy","service":"llm-router","timestamp":%d}`, time.Now().Unix())
+	})
+	
+	// Ready endpoint
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status":"ready","providers_count":0}`)
+	})
+	
+	// Create HTTP server
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
-}
-
-func initLogger(level, env string) *zap.Logger {
-	var zapLevel zapcore.Level
-	switch level {
-	case "debug":
-		zapLevel = zapcore.DebugLevel
-	case "info":
-		zapLevel = zapcore.InfoLevel
-	case "warn":
-		zapLevel = zapcore.WarnLevel
-	case "error":
-		zapLevel = zapcore.ErrorLevel
-	default:
-		zapLevel = zapcore.InfoLevel
+	
+	// Setup graceful shutdown
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	
+	// Start server in goroutine
+	go func() {
+		logger.Info("Starting LLM Router server", zap.String("port", port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("Server failed to start", zap.Error(err))
+		}
+	}()
+	
+	// Wait for shutdown signal
+	<-shutdown
+	
+	logger.Info("Shutting down server...")
+	
+	// Give outstanding requests 5 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Error("Server forced to shutdown", zap.Error(err))
 	}
-
-	var config zap.Config
-	if env == "production" {
-		config = zap.NewProductionConfig()
-		config.Level = zap.NewAtomicLevelAt(zapLevel)
-	} else {
-		config = zap.NewDevelopmentConfig()
-		config.Level = zap.NewAtomicLevelAt(zapLevel)
-		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	
+	// Close Redis connection
+	if redisClient != nil {
+		redisClient.Close()
 	}
-
-	logger, err := config.Build()
-	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
-	}
-
-	return logger
+	
+	logger.Info("Server shutdown complete")
 }
 
 func getEnv(key, defaultValue string) string {

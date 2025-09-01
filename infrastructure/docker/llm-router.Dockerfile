@@ -8,13 +8,13 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 # Copy go mod and sum files
-COPY go.mod go.sum ./
+COPY packages/llm-router/go.mod packages/llm-router/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY packages/llm-router/ ./
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o llm-router ./cmd/main.go

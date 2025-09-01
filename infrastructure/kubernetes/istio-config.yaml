@@ -1,0 +1,303 @@
+# Istio Service Mesh Configuration for Enterprise-Grade Security and Observability
+---
+# Enable Istio injection for namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: quantumlayer
+  labels:
+    istio-injection: enabled
+---
+# Istio Gateway for ingress traffic
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: quantumlayer-gateway
+  namespace: quantumlayer
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: quantumlayer-tls
+    hosts:
+    - "*.quantumlayer.ai"
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*.quantumlayer.ai"
+    tls:
+      httpsRedirect: true  # Redirect HTTP to HTTPS
+---
+# Virtual Service for LLM Router
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: llm-router
+  namespace: quantumlayer
+spec:
+  hosts:
+  - llm.quantumlayer.ai
+  gateways:
+  - quantumlayer-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: llm-router.quantumlayer.svc.cluster.local
+        port:
+          number: 8080
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    headers:
+      request:
+        add:
+          x-request-id: "%REQ(X-REQUEST-ID)%"
+          x-b3-traceid: "%REQ(X-B3-TRACEID)%"
+          x-b3-spanid: "%REQ(X-B3-SPANID)%"
+---
+# Destination Rule with circuit breaker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: llm-router
+  namespace: quantumlayer
+spec:
+  host: llm-router.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 1000
+        maxRequestsPerConnection: 2
+        h2UpgradePolicy: UPGRADE
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 30
+      splitExternalLocalOriginErrors: true
+    tls:
+      mode: ISTIO_MUTUAL  # mTLS between services
+---
+# Virtual Service for Agent Orchestrator
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: agent-orchestrator
+  namespace: quantumlayer
+spec:
+  hosts:
+  - agent.quantumlayer.ai
+  gateways:
+  - quantumlayer-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: agent-orchestrator.quantumlayer.svc.cluster.local
+        port:
+          number: 8083
+      weight: 100
+    timeout: 60s  # Longer timeout for agent operations
+    retries:
+      attempts: 3
+      perTryTimeout: 20s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+---
+# Destination Rule for Agent Orchestrator
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: agent-orchestrator
+  namespace: quantumlayer
+spec:
+  host: agent-orchestrator.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 500
+    outlierDetection:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+    tls:
+      mode: ISTIO_MUTUAL
+---
+# Service Entry for external LLM providers
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: openai-api
+  namespace: quantumlayer
+spec:
+  hosts:
+  - api.openai.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: anthropic-api
+  namespace: quantumlayer
+spec:
+  hosts:
+  - api.anthropic.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# Destination Rule for external services with circuit breaker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: openai-api
+  namespace: quantumlayer
+spec:
+  host: api.openai.com
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 10
+      http:
+        http1MaxPendingRequests: 10
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutiveErrors: 2
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+    tls:
+      mode: SIMPLE  # TLS to external service
+---
+# PeerAuthentication for strict mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: quantumlayer
+spec:
+  mtls:
+    mode: STRICT
+---
+# AuthorizationPolicy for fine-grained access control
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: llm-router-authz
+  namespace: quantumlayer
+spec:
+  selector:
+    matchLabels:
+      app: llm-router
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/quantumlayer/sa/agent-orchestrator"]
+    - source:
+        principals: ["cluster.local/ns/quantumlayer/sa/api-gateway"]
+    to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/api/v1/*"]
+---
+# Telemetry configuration for metrics and tracing
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: quantumlayer-metrics
+  namespace: quantumlayer
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+    dimensions:
+      request_protocol: request.protocol
+      response_code: response.code | "unknown"
+  - overrides:
+    - match:
+        metric: REQUEST_COUNT
+      tagOverrides:
+        method:
+          value: request.method
+        uri:
+          value: request.path
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: quantumlayer-tracing
+  namespace: quantumlayer
+spec:
+  tracing:
+  - providers:
+    - name: jaeger
+    randomSamplingPercentage: 100.0  # Sample all requests in dev, reduce in prod
+    customTags:
+      environment:
+        literal:
+          value: production
+      version:
+        header:
+          name: x-app-version
+---
+# Rate limiting configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ratelimit-config
+  namespace: quantumlayer
+data:
+  config.yaml: |
+    domain: quantumlayer-ratelimit
+    descriptors:
+      - key: PATH
+        value: "/api/v1/generate"
+        rate_limit:
+          unit: minute
+          requests_per_unit: 10
+      - key: PATH
+        value: "/api/v1/llm"
+        rate_limit:
+          unit: second
+          requests_per_unit: 50
+      - key: HEADER
+        match: x-api-key
+        rate_limit:
+          unit: hour
+          requests_per_unit: 1000

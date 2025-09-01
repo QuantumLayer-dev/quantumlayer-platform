@@ -76,6 +76,32 @@ spec:
             secretKeyRef:
               name: llm-credentials
               key: azure-openai-key
+        - name: AZURE_OPENAI_DEPLOYMENT
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: azure-openai-deployment
+        - name: DEFAULT_LLM_PROVIDER
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: default-llm-provider
+        - name: DB_HOST
+          value: postgres.quantumlayer.svc.cluster.local
+        - name: DB_PORT
+          value: "5432"
+        - name: DB_NAME
+          value: quantumlayer
+        - name: DB_USER
+          value: qlayer
+        - name: DB_PASSWORD
+          value: QuantumLayer2024!
+        - name: REDIS_HOST
+          value: redis.quantumlayer.svc.cluster.local
+        - name: REDIS_PORT
+          value: "6379"
+        - name: JAEGER_ENDPOINT
+          value: http://jaeger-collector.istio-system.svc.cluster.local:14268
         envFrom:
         - configMapRef:
             name: llm-router-config

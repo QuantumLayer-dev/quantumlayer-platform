@@ -23,7 +23,7 @@ Master tracking document for QuantumLayer V2 development progress across session
    - HTTP API on port 8082
    - Prometheus metrics integration
 
-2. **LLM Router Service** (Go + Gin)
+2. **LLM Router Service** (Go + Gin) ✅ DEPLOYED
    - Multi-provider routing (OpenAI, Anthropic, Groq, Bedrock)
    - Intelligent fallback chains
    - Health monitoring with exponential backoff
@@ -32,9 +32,12 @@ Master tracking document for QuantumLayer V2 development progress across session
    - Redis caching support
    - Streaming support
    - NodePort 30881
+   - Successfully deployed to K8s with 3 replicas
+   - Health and ready endpoints operational
+   - Published to GHCR: ghcr.io/quantumlayer-dev/llm-router:latest
 
 ### 🚧 In Progress
-- Agent Orchestrator
+- Agent Orchestrator (Next priority)
 - API Gateway (GraphQL)
 - Web Frontend (Next.js)
 
@@ -196,8 +199,13 @@ Master tracking document for QuantumLayer V2 development progress across session
 1. **GitHub Repository**: Created and configured at https://github.com/QuantumLayer-dev/quantumlayer-platform
 2. **Infrastructure**: Deployed PostgreSQL and Redis to Kubernetes
 3. **Tree-sitter Parser**: Complete code parsing service with 23+ languages
-4. **LLM Router**: Multi-provider routing service with health checking and fallbacks
+4. **LLM Router**: Multi-provider routing service deployed to Kubernetes
+   - Successfully built Docker image and pushed to GHCR
+   - Deployed with 3 replicas using HPA (auto-scaling 3-10 pods)
+   - Health and ready endpoints verified working
+   - Accessible via NodePort 30881 on cluster IPs
 5. **Documentation**: Organized into proper structure (architecture, planning, operations, development)
+6. **Secrets Management**: Configured LLM credentials from existing qlayer-dev namespace
 
 ### For Next Session
 1. **Priority**: Agent Orchestrator implementation

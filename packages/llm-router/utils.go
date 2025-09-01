@@ -5,7 +5,11 @@ import (
 	"encoding/hex"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 // generateRequestID generates a unique request ID
@@ -210,4 +214,220 @@ func hashRequest(req *Request) string {
 	}
 	
 	return strings.Join(parts, "|")
+}
+
+// LoggerMiddleware creates a Gin middleware for logging
+func LoggerMiddleware(logger *zap.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+
+		c.Next()
+
+		latency := time.Since(start)
+		clientIP := c.ClientIP()
+		method := c.Request.Method
+		statusCode := c.Writer.Status()
+
+		if raw != "" {
+			path = path + "?" + raw
+		}
+
+		logger.Info("Request",
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", statusCode),
+			zap.String("ip", clientIP),
+			zap.Duration("latency", latency),
+		)
+	}
+}
+
+// CORSMiddleware creates a Gin middleware for CORS
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+// AuthMiddleware creates a Gin middleware for authentication
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// TODO: Implement proper authentication
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(401, gin.H{"error": "Missing authorization header"})
+			c.Abort()
+			return
+		}
+
+		// Set user context for downstream handlers
+		c.Set("user_id", "user-123")
+		c.Set("org_id", "org-456")
+		c.Next()
+	}
+}
+
+// RateLimiter implements token bucket rate limiting
+type RateLimiter struct {
+	tokens     int
+	maxTokens  int
+	refillRate time.Duration
+	lastRefill time.Time
+	mu         sync.Mutex
+}
+
+// NewRateLimiter creates a new rate limiter
+func NewRateLimiter(maxTokens int, refillRate time.Duration) *RateLimiter {
+	return &RateLimiter{
+		tokens:     maxTokens,
+		maxTokens:  maxTokens,
+		refillRate: refillRate,
+		lastRefill: time.Now(),
+	}
+}
+
+// Allow checks if request is allowed
+func (r *RateLimiter) Allow() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(r.lastRefill)
+	tokensToAdd := int(elapsed / r.refillRate)
+
+	if tokensToAdd > 0 {
+		r.tokens = min(r.tokens+tokensToAdd, r.maxTokens)
+		r.lastRefill = now
+	}
+
+	if r.tokens > 0 {
+		r.tokens--
+		return true
+	}
+
+	return false
+}
+
+// TokenBucket implements token bucket for quota management
+type TokenBucket struct {
+	tokens     int64
+	maxTokens  int64
+	refillRate time.Duration
+	lastRefill time.Time
+	mu         sync.Mutex
+}
+
+// NewTokenBucket creates a new token bucket
+func NewTokenBucket(maxTokens int64, refillRate time.Duration) *TokenBucket {
+	return &TokenBucket{
+		tokens:     maxTokens,
+		maxTokens:  maxTokens,
+		refillRate: refillRate,
+		lastRefill: time.Now(),
+	}
+}
+
+// Consume attempts to consume tokens
+func (t *TokenBucket) Consume(tokens int64) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(t.lastRefill)
+	if elapsed >= t.refillRate {
+		t.tokens = t.maxTokens
+		t.lastRefill = now
+	}
+
+	if t.tokens >= tokens {
+		t.tokens -= tokens
+		return true
+	}
+
+	return false
+}
+
+// HealthChecker monitors provider health
+type HealthChecker struct {
+	failures    int
+	maxFailures int
+	lastCheck   time.Time
+	isHealthy   bool
+	backoff     time.Duration
+	mu          sync.RWMutex
+}
+
+// NewHealthChecker creates a new health checker
+func NewHealthChecker() *HealthChecker {
+	return &HealthChecker{
+		maxFailures: 3,
+		isHealthy:   true,
+		backoff:     time.Second,
+	}
+}
+
+// RecordSuccess records a successful request
+func (h *HealthChecker) RecordSuccess() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.failures = 0
+	h.isHealthy = true
+	h.backoff = time.Second
+	h.lastCheck = time.Now()
+}
+
+// RecordFailure records a failed request
+func (h *HealthChecker) RecordFailure() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.failures++
+	h.lastCheck = time.Now()
+
+	if h.failures >= h.maxFailures {
+		h.isHealthy = false
+		// Exponential backoff
+		h.backoff = min(h.backoff*2, 5*time.Minute)
+	}
+}
+
+// IsHealthy checks if provider is healthy
+func (h *HealthChecker) IsHealthy() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.isHealthy {
+		// Check if enough time has passed for retry
+		if time.Since(h.lastCheck) >= h.backoff {
+			h.mu.RUnlock()
+			h.mu.Lock()
+			h.isHealthy = true
+			h.failures = 0
+			h.mu.Unlock()
+			h.mu.RLock()
+		}
+	}
+
+	return h.isHealthy
+}
+
+// min returns the minimum of two values
+func min[T ~int | ~int64 | time.Duration](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
 }
