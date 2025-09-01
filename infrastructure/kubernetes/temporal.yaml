@@ -1,0 +1,572 @@
+# Temporal Workflow Engine for QuantumLayer V2
+# Production-ready configuration with PostgreSQL backend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-config
+  namespace: quantumlayer
+data:
+  dynamicconfig.yaml: |
+    frontend.enableClientVersionCheck:
+      - value: true
+    history.persistenceMaxQPS:
+      - value: 3000
+    frontend.persistenceMaxQPS:
+      - value: 3000
+    frontend.historyMgrNumConns:
+      - value: 10
+    frontend.throttledLogRPS:
+      - value: 20
+    history.historyMgrNumConns:
+      - value: 50
+    system.advancedVisibilityWritingMode:
+      - value: "on"
+    history.defaultActivityRetryPolicy:
+      - value:
+          InitialIntervalInSeconds: 1
+          MaximumIntervalCoefficient: 100.0
+          BackoffCoefficient: 2.0
+          MaximumAttempts: 0
+    history.defaultWorkflowRetryPolicy:
+      - value:
+          InitialIntervalInSeconds: 1
+          MaximumIntervalCoefficient: 100.0
+          BackoffCoefficient: 2.0
+          MaximumAttempts: 0
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-server-config
+  namespace: quantumlayer
+data:
+  config_template.yaml: |
+    persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 512
+      datastores:
+        default:
+          sql:
+            pluginName: "postgres"
+            databaseName: "temporal"
+            connectAddr: "postgres.quantumlayer.svc.cluster.local:5432"
+            connectProtocol: "tcp"
+            user: "qlayer"
+            password: "QuantumLayer2024!"
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: "1h"
+        visibility:
+          sql:
+            pluginName: "postgres"
+            databaseName: "temporal_visibility"
+            connectAddr: "postgres.quantumlayer.svc.cluster.local:5432"
+            connectProtocol: "tcp"
+            user: "qlayer"
+            password: "QuantumLayer2024!"
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: "1h"
+    
+    global:
+      membership:
+        maxJoinDuration: 30s
+        broadcastAddress: ""
+      pprof:
+        port: 7936
+      metrics:
+        prometheus:
+          timerType: "histogram"
+          listenAddress: "0.0.0.0:9090"
+    
+    services:
+      frontend:
+        rpc:
+          grpcPort: 7233
+          membershipPort: 6933
+          bindOnLocalHost: false
+        metrics:
+          tags:
+            type: "frontend"
+      
+      matching:
+        rpc:
+          grpcPort: 7235
+          membershipPort: 6935
+          bindOnLocalHost: false
+        metrics:
+          tags:
+            type: "matching"
+      
+      history:
+        rpc:
+          grpcPort: 7234
+          membershipPort: 6934
+          bindOnLocalHost: false
+        metrics:
+          tags:
+            type: "history"
+      
+      worker:
+        rpc:
+          grpcPort: 7239
+          membershipPort: 6939
+          bindOnLocalHost: false
+        metrics:
+          tags:
+            type: "worker"
+    
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: "active"
+      currentClusterName: "active"
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: "frontend"
+          rpcAddress: "localhost:7233"
+    
+    publicClient:
+      hostPort: "temporal-frontend:7233"
+    
+    archival:
+      history:
+        state: "disabled"
+      visibility:
+        state: "disabled"
+    
+    namespaceDefaults:
+      archival:
+        history:
+          state: "disabled"
+        visibility:
+          state: "disabled"
+---
+# Frontend Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-frontend
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: frontend
+    spec:
+      containers:
+      - name: temporal-frontend
+        image: temporalio/server:1.22.4
+        env:
+        - name: SERVICES
+          value: frontend
+        - name: TEMPORAL_CONFIG_DIR
+          value: /etc/temporal/config
+        - name: DYNAMIC_CONFIG_FILE_PATH
+          value: /etc/temporal/dynamic/dynamicconfig.yaml
+        ports:
+        - containerPort: 7233
+          name: grpc
+        - containerPort: 6933
+          name: membership
+        - containerPort: 9090
+          name: metrics
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+        - name: dynamic-config
+          mountPath: /etc/temporal/dynamic
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          tcpSocket:
+            port: 7233
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          tcpSocket:
+            port: 7233
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: temporal-server-config
+      - name: dynamic-config
+        configMap:
+          name: temporal-config
+---
+# History Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-history
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: history
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+      component: history
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: history
+    spec:
+      containers:
+      - name: temporal-history
+        image: temporalio/server:1.22.4
+        env:
+        - name: SERVICES
+          value: history
+        - name: TEMPORAL_CONFIG_DIR
+          value: /etc/temporal/config
+        - name: DYNAMIC_CONFIG_FILE_PATH
+          value: /etc/temporal/dynamic/dynamicconfig.yaml
+        ports:
+        - containerPort: 7234
+          name: grpc
+        - containerPort: 6934
+          name: membership
+        - containerPort: 9090
+          name: metrics
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+        - name: dynamic-config
+          mountPath: /etc/temporal/dynamic
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      volumes:
+      - name: config
+        configMap:
+          name: temporal-server-config
+      - name: dynamic-config
+        configMap:
+          name: temporal-config
+---
+# Matching Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-matching
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: matching
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+      component: matching
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: matching
+    spec:
+      containers:
+      - name: temporal-matching
+        image: temporalio/server:1.22.4
+        env:
+        - name: SERVICES
+          value: matching
+        - name: TEMPORAL_CONFIG_DIR
+          value: /etc/temporal/config
+        - name: DYNAMIC_CONFIG_FILE_PATH
+          value: /etc/temporal/dynamic/dynamicconfig.yaml
+        ports:
+        - containerPort: 7235
+          name: grpc
+        - containerPort: 6935
+          name: membership
+        - containerPort: 9090
+          name: metrics
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+        - name: dynamic-config
+          mountPath: /etc/temporal/dynamic
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: temporal-server-config
+      - name: dynamic-config
+        configMap:
+          name: temporal-config
+---
+# Worker Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: worker
+    spec:
+      containers:
+      - name: temporal-worker
+        image: temporalio/server:1.22.4
+        env:
+        - name: SERVICES
+          value: worker
+        - name: TEMPORAL_CONFIG_DIR
+          value: /etc/temporal/config
+        - name: DYNAMIC_CONFIG_FILE_PATH
+          value: /etc/temporal/dynamic/dynamicconfig.yaml
+        ports:
+        - containerPort: 7239
+          name: grpc
+        - containerPort: 6939
+          name: membership
+        - containerPort: 9090
+          name: metrics
+        volumeMounts:
+        - name: config
+          mountPath: /etc/temporal/config
+        - name: dynamic-config
+          mountPath: /etc/temporal/dynamic
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: temporal-server-config
+      - name: dynamic-config
+        configMap:
+          name: temporal-config
+---
+# Temporal Web UI
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal
+      component: ui
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: ui
+    spec:
+      containers:
+      - name: temporal-ui
+        image: temporalio/ui:2.21.3
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: temporal-frontend:7233
+        - name: TEMPORAL_CORS_ORIGINS
+          value: http://localhost:3000
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+# Frontend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 7233
+    targetPort: 7233
+    protocol: TCP
+    name: grpc
+  selector:
+    app: temporal
+    component: frontend
+---
+# Frontend Headless Service for clustering
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend-headless
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 7233
+    targetPort: 7233
+    name: grpc
+  - port: 6933
+    targetPort: 6933
+    name: membership
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  selector:
+    app: temporal
+    component: frontend
+---
+# History Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-history-headless
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 7234
+    targetPort: 7234
+    name: grpc
+  - port: 6934
+    targetPort: 6934
+    name: membership
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  selector:
+    app: temporal
+    component: history
+---
+# Matching Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-matching-headless
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 7235
+    targetPort: 7235
+    name: grpc
+  - port: 6935
+    targetPort: 6935
+    name: membership
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  selector:
+    app: temporal
+    component: matching
+---
+# Worker Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-worker-headless
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - port: 7239
+    targetPort: 7239
+    name: grpc
+  - port: 6939
+    targetPort: 6939
+    name: membership
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  selector:
+    app: temporal
+    component: worker
+---
+# UI Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: temporal
+    component: ui
+---
+# NodePort for UI access
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui-nodeport
+  namespace: quantumlayer
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30888
+    protocol: TCP
+    name: http
+  selector:
+    app: temporal
+    component: ui
