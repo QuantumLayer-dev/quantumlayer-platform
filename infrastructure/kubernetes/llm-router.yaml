@@ -9,19 +9,14 @@ data:
   REDIS_URL: "redis://redis:6379"
   PORT: "8080"
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: llm-provider-secrets
-  namespace: quantumlayer
-type: Opaque
-stringData:
-  OPENAI_API_KEY: ""  # Add your API key
-  ANTHROPIC_API_KEY: ""  # Add your API key
-  GROQ_API_KEY: ""  # Add your API key
-  AWS_ACCESS_KEY_ID: ""  # Add for Bedrock
-  AWS_SECRET_ACCESS_KEY: ""  # Add for Bedrock
-  AWS_BEDROCK_REGION: "us-east-1"
+# Secret already exists from qlayer-dev namespace copy
+# Using llm-credentials secret which contains:
+# - aws-access-key-id
+# - aws-secret-access-key  
+# - aws-bedrock-model
+# - azure-openai-endpoint
+# - azure-openai-key
+# - azure-openai-deployment
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -42,6 +37,8 @@ spec:
         app: llm-router
         component: ai
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: llm-router
         image: ghcr.io/quantumlayer-dev/llm-router:latest
@@ -51,11 +48,37 @@ spec:
           name: http
         - containerPort: 9090
           name: metrics
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: aws-secret-access-key
+        - name: AWS_BEDROCK_REGION
+          value: "us-east-1"
+        - name: AWS_BEDROCK_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: aws-bedrock-model
+        - name: AZURE_OPENAI_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: azure-openai-endpoint
+        - name: AZURE_OPENAI_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-credentials
+              key: azure-openai-key
         envFrom:
         - configMapRef:
             name: llm-router-config
-        - secretRef:
-            name: llm-provider-secrets
         resources:
           requests:
             memory: "512Mi"
