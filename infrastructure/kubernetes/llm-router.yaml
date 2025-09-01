@@ -1,0 +1,162 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-router-config
+  namespace: quantumlayer
+data:
+  ENVIRONMENT: "kubernetes"
+  LOG_LEVEL: "info"
+  REDIS_URL: "redis://redis:6379"
+  PORT: "8080"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-provider-secrets
+  namespace: quantumlayer
+type: Opaque
+stringData:
+  OPENAI_API_KEY: ""  # Add your API key
+  ANTHROPIC_API_KEY: ""  # Add your API key
+  GROQ_API_KEY: ""  # Add your API key
+  AWS_ACCESS_KEY_ID: ""  # Add for Bedrock
+  AWS_SECRET_ACCESS_KEY: ""  # Add for Bedrock
+  AWS_BEDROCK_REGION: "us-east-1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-router
+  namespace: quantumlayer
+  labels:
+    app: llm-router
+    component: ai
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: llm-router
+  template:
+    metadata:
+      labels:
+        app: llm-router
+        component: ai
+    spec:
+      containers:
+      - name: llm-router
+        image: ghcr.io/quantumlayer-dev/llm-router:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        envFrom:
+        - configMapRef:
+            name: llm-router-config
+        - secretRef:
+            name: llm-provider-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+      volumes:
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-router
+  namespace: quantumlayer
+  labels:
+    app: llm-router
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: llm-router
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-router-nodeport
+  namespace: quantumlayer
+  labels:
+    app: llm-router
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30881
+    protocol: TCP
+    name: http
+  selector:
+    app: llm-router
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: llm-router-hpa
+  namespace: quantumlayer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: llm-router
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: llm-router-pdb
+  namespace: quantumlayer
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: llm-router
