@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: quantumlayer
+  labels:
+    name: quantumlayer
+    app: quantumlayer
+    environment: development
