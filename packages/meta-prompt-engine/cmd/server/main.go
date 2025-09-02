@@ -43,8 +43,9 @@ func main() {
 	defer cleanup()
 	_ = tracer // Will be used later
 
-	// Create LLM client (using mock for now)
-	llmClient := &MockLLMClient{logger: logger}
+	// Create real LLM client pointing to LLM Router service
+	llmClient := engine.NewRealLLMClient("", logger)
+	logger.Info("Using real LLM Router client")
 
 	// Initialize Meta Prompt Engine
 	metaEngine := engine.NewMetaPromptEngine(llmClient, logger)

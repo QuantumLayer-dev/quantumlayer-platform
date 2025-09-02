@@ -69,6 +69,7 @@ func (a *BaseAgent) Stop() error {
 // GeneratorAgent handles code generation tasks
 type GeneratorAgent struct {
 	BaseAgent
+	llmClient *LLMClient
 }
 
 // NewGeneratorAgent creates a new generator agent
@@ -85,6 +86,7 @@ func NewGeneratorAgent(logger *zap.Logger) *GeneratorAgent {
 			CreatedAt:    time.Now(),
 			LastActiveAt: time.Now(),
 		},
+		llmClient: NewLLMClient("", logger),
 	}
 }
 
@@ -128,8 +130,13 @@ func (g *GeneratorAgent) Execute(ctx context.Context, task *Task) error {
 	language, _ := input["language"].(string)
 	framework, _ := input["framework"].(string)
 	
-	// Generate code (simplified for MVP)
-	generatedCode := g.generateCode(prompt, language, framework)
+	// Generate code using LLM Router
+	generatedCode, err := g.generateCodeWithLLM(ctx, prompt, language, framework)
+	if err != nil {
+		g.Logger.Error("Failed to generate code with LLM", zap.Error(err))
+		// Fallback to templates
+		generatedCode = g.generateCode(prompt, language, framework)
+	}
 	
 	// Set output
 	task.Output = map[string]interface{}{
@@ -148,16 +155,24 @@ func (g *GeneratorAgent) Execute(ctx context.Context, task *Task) error {
 	return nil
 }
 
-// generateCode generates code based on the prompt (simplified)
+// generateCodeWithLLM generates code using the LLM Router service
+func (g *GeneratorAgent) generateCodeWithLLM(ctx context.Context, prompt, language, framework string) (string, error) {
+	if g.llmClient == nil {
+		return "", fmt.Errorf("LLM client not initialized")
+	}
+	
+	return g.llmClient.GenerateCode(ctx, prompt, language, framework)
+}
+
+// generateCode generates code based on the prompt (simplified fallback)
 func (g *GeneratorAgent) generateCode(prompt, language, framework string) string {
-	// This is a simplified version for MVP
-	// In production, this would call the LLM Router service
+	// Fallback template-based generation
 	
 	if language == "" {
 		language = "javascript"
 	}
 	
-	// Template-based generation for MVP
+	// Template-based generation as fallback
 	templates := map[string]string{
 		"hello-world": `// Generated Hello World Application
 function main() {
