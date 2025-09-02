@@ -1,0 +1,21 @@
+# Direct NodePort service for Temporal UI without Istio
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui-direct
+  namespace: quantumlayer
+  labels:
+    app: temporal
+    component: web
+spec:
+  type: NodePort
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30889
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/instance: temporal
+    app.kubernetes.io/component: web

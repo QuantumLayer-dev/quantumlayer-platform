@@ -1,0 +1,204 @@
+# Temporal Helm Chart Values for QuantumLayer V2
+# Production-ready configuration with PostgreSQL backend
+
+# Use existing PostgreSQL cluster
+cassandra:
+  enabled: false
+  
+mysql:
+  enabled: false
+  
+postgresql:
+  enabled: false
+  
+elasticsearch:
+  enabled: false
+  
+prometheus:
+  enabled: false
+  
+grafana:
+  enabled: false
+
+# Server configuration
+server:
+  replicaCount: 1
+  
+  config:
+    persistence:
+      defaultStore: postgres-default
+      visibilityStore: postgres-visibility
+      
+      datastores:
+        postgres-default:
+          sql:
+            driver: "postgres"
+            host: "postgres-cluster-rw.quantumlayer.svc.cluster.local"
+            port: 5432
+            database: "temporal"
+            user: "qlayer"
+            password: "QuantumLayer2024!"
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: "1h"
+            
+        postgres-visibility:
+          sql:
+            driver: "postgres"
+            host: "postgres-cluster-rw.quantumlayer.svc.cluster.local"
+            port: 5432
+            database: "temporal_visibility"
+            user: "qlayer"
+            password: "QuantumLayer2024!"
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: "1h"
+    
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: "active"
+      currentClusterName: "active"
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: "frontend"
+          rpcAddress: "127.0.0.1:7233"
+  
+  frontend:
+    replicaCount: 2
+    service:
+      type: ClusterIP
+      port: 7233
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    podAnnotations:
+      sidecar.istio.io/inject: "true"
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9090"
+  
+  history:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+    podAnnotations:
+      sidecar.istio.io/inject: "true"
+  
+  matching:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    podAnnotations:
+      sidecar.istio.io/inject: "true"
+  
+  worker:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    podAnnotations:
+      sidecar.istio.io/inject: "true"
+
+# Web UI configuration
+web:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: NodePort
+    port: 8088
+    nodePort: 30888
+  ingress:
+    enabled: false
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  podAnnotations:
+    sidecar.istio.io/inject: "true"
+
+# Admin tools for schema setup
+admintools:
+  enabled: true
+  image:
+    repository: temporalio/admin-tools
+    tag: "1.22.4"
+    
+# Schema setup and update
+schema:
+  setup:
+    enabled: true
+    backoffLimit: 10
+  update:
+    enabled: true
+    backoffLimit: 10
+
+# Global settings
+global:
+  serviceAccount:
+    create: true
+    name: temporal
+  
+# Service mesh integration
+serviceAccount:
+  create: true
+  name: temporal
+  annotations:
+    sidecar.istio.io/inject: "true"
+
+# Monitoring
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # We're using Istio telemetry instead
+
+# Dynamic config
+dynamicConfig:
+  frontend.enableClientVersionCheck:
+    - value: true
+  history.persistenceMaxQPS:
+    - value: 3000
+  frontend.persistenceMaxQPS:
+    - value: 3000
+  frontend.historyMgrNumConns:
+    - value: 10
+  frontend.throttledLogRPS:
+    - value: 20
+  history.historyMgrNumConns:
+    - value: 50
+  system.advancedVisibilityWritingMode:
+    - value: "on"
+  history.defaultActivityRetryPolicy:
+    - value:
+        InitialIntervalInSeconds: 1
+        MaximumIntervalCoefficient: 100.0
+        BackoffCoefficient: 2.0
+        MaximumAttempts: 0
+  history.defaultWorkflowRetryPolicy:
+    - value:
+        InitialIntervalInSeconds: 1
+        MaximumIntervalCoefficient: 100.0
+        BackoffCoefficient: 2.0
+        MaximumAttempts: 0

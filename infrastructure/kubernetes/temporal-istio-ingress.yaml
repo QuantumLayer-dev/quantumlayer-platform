@@ -1,0 +1,111 @@
+# Enterprise-grade Istio ingress configuration for Temporal
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: temporal-ui
+  namespace: quantumlayer
+spec:
+  hosts:
+  - temporal-ui.quantumlayer.local
+  - temporal-ui
+  gateways:
+  - istio-system/main-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: temporal-web.quantumlayer.svc.cluster.local
+        port:
+          number: 8080
+    corsPolicy:
+      allowOrigins:
+      - exact: "*"
+      allowMethods:
+      - POST
+      - GET
+      - OPTIONS
+      - PUT
+      - DELETE
+      allowHeaders:
+      - content-type
+      - authorization
+      - x-request-id
+      maxAge: "24h"
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: temporal-ui
+  namespace: quantumlayer
+spec:
+  host: temporal-web.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+    loadBalancer:
+      simple: ROUND_ROBIN
+---
+# Gateway entry for Temporal UI
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: temporal-gateway
+  namespace: quantumlayer
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - temporal.quantumlayer.local
+    - "temporal.192.168.7.241.nip.io"  # For development access
+---
+# VirtualService for the Gateway
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: temporal-gateway-vs
+  namespace: quantumlayer
+spec:
+  hosts:
+  - temporal.quantumlayer.local
+  - "temporal.192.168.7.241.nip.io"
+  gateways:
+  - temporal-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: temporal-web.quantumlayer.svc.cluster.local
+        port:
+          number: 8080
+---
+# ServiceEntry for external access (if needed)
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: temporal-external
+  namespace: quantumlayer
+spec:
+  hosts:
+  - temporal.external.local
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  - number: 80
+    name: http
+    protocol: HTTP
+  location: MESH_EXTERNAL
+  resolution: DNS
