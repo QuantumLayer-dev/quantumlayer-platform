@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "meta-prompt-engine.fullname" . }}
+  labels:
+    {{- include "meta-prompt-engine.labels" . | nindent 4 }}
+    version: {{ .Values.image.tag | quote }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "meta-prompt-engine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "meta-prompt-engine.labels" . | nindent 8 }}
+        version: {{ .Values.image.tag | quote }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "meta-prompt-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.server.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.config.server.metricsPort }}
+              protocol: TCP
+          env:
+            - name: SERVICE_NAME
+              value: "meta-prompt-engine"
+            - name: SERVICE_VERSION
+              value: {{ .Values.image.tag | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel }}
+            - name: SERVER_PORT
+              value: {{ .Values.config.server.port | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.config.server.metricsPort | quote }}
+            - name: POSTGRES_HOST
+              value: {{ .Values.config.postgres.host }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.config.postgres.port | quote }}
+            - name: POSTGRES_DATABASE
+              value: {{ .Values.config.postgres.database }}
+            - name: POSTGRES_SSL_MODE
+              value: {{ .Values.config.postgres.sslMode }}
+            - name: REDIS_HOST
+              value: {{ .Values.config.redis.host }}
+            - name: REDIS_PORT
+              value: {{ .Values.config.redis.port | quote }}
+            - name: REDIS_DB
+              value: {{ .Values.config.redis.db | quote }}
+            - name: JAEGER_ENDPOINT
+              value: {{ .Values.config.tracing.endpoint }}
+            - name: JAEGER_SAMPLING_RATE
+              value: {{ .Values.config.tracing.samplingRate | quote }}
+            - name: DEFAULT_LLM_PROVIDER
+              value: {{ .Values.config.llm.defaultProvider }}
+          envFrom:
+            - secretRef:
+                name: {{ include "meta-prompt-engine.fullname" . }}-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/cache
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "meta-prompt-engine.fullname" . }}
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

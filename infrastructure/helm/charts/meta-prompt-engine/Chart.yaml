@@ -1,0 +1,31 @@
+apiVersion: v2
+name: meta-prompt-engine
+description: Enterprise-grade Meta Prompt Engine for QuantumLayer Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/QuantumLayer-dev/quantumlayer-platform
+sources:
+  - https://github.com/QuantumLayer-dev/quantumlayer-platform
+maintainers:
+  - name: QuantumLayer Team
+    email: engineering@quantumlayer.dev
+dependencies:
+  - name: postgresql
+    version: "13.2.24"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.6.1"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+keywords:
+  - ai
+  - prompt-engineering
+  - llm
+  - optimization
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/signKey: |
+    fingerprint: 7DAD6CC5A4D4E8D9B9F4CE93FC1D0E36E5F9B8A0
+  artifacthub.io/prerelease: "false"

@@ -9,8 +9,7 @@ WORKDIR /app
 
 # Copy go mod files
 COPY go.mod go.sum ./
-COPY packages/meta-prompt-engine/go.mod packages/meta-prompt-engine/
-COPY packages/shared/go.mod packages/shared/
+COPY packages/meta-prompt-engine/go.mod packages/meta-prompt-engine/go.sum packages/meta-prompt-engine/
 
 # Download dependencies
 RUN go mod download

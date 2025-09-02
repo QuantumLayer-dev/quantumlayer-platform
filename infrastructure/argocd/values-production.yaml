@@ -1,0 +1,165 @@
+# ArgoCD Production Values - Enterprise Configuration
+global:
+  domain: argocd.quantumlayer.io
+  
+server:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+  
+  # Enterprise SSO
+  config:
+    url: https://argocd.quantumlayer.io
+    
+    # OIDC Configuration
+    oidc.config: |
+      name: QuantumLayer SSO
+      issuer: https://auth.quantumlayer.io
+      clientId: argocd
+      clientSecret: $oidc.quantumlayer.clientSecret
+      requestedScopes: ["openid", "profile", "email", "groups"]
+      requestedIDTokenClaims: {"groups": {"essential": true}}
+      
+    # RBAC Configuration
+    policy.csv: |
+      p, role:admin, applications, *, */*, allow
+      p, role:admin, clusters, *, *, allow
+      p, role:admin, repositories, *, *, allow
+      p, role:developer, applications, get, */*, allow
+      p, role:developer, applications, sync, */*, allow
+      p, role:developer, applications, action/*, */*, allow
+      g, quantumlayer:admins, role:admin
+      g, quantumlayer:developers, role:developer
+      
+    # Repository credentials
+    repositories: |
+      - url: https://github.com/QuantumLayer-dev/quantumlayer-platform
+        type: git
+        name: quantumlayer-platform
+        
+  # Ingress via Istio
+  ingress:
+    enabled: false  # Using Istio VirtualService instead
+    
+  # Metrics
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      
+controller:
+  replicas: 2
+  
+  # Performance tuning
+  args:
+    appResyncPeriod: "60"
+    operationProcessors: "20"
+    logLevel: "info"
+    metricsPort: 8082
+    
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      
+repoServer:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    
+  # Tool versions
+  initContainers:
+    - name: download-tools
+      image: alpine/helm:latest
+      command: [sh, -c]
+      args:
+        - |
+          helm plugin install https://github.com/databus23/helm-diff
+          helm plugin install https://github.com/aslafy-z/helm-git
+          
+  volumes:
+    - name: custom-tools
+      emptyDir: {}
+      
+  volumeMounts:
+    - mountPath: /usr/local/bin
+      name: custom-tools
+      
+redis:
+  enabled: true
+  ha:
+    enabled: true
+    
+dex:
+  enabled: false  # Using external OIDC
+  
+# Notifications
+notifications:
+  enabled: true
+  argocdUrl: https://argocd.quantumlayer.io
+  
+  notifiers:
+    service.slack: |
+      token: $slack-token
+      
+  subscriptions:
+    - recipients:
+        - slack:quantumlayer-deployments
+      triggers:
+        - on-deployed
+        - on-health-degraded
+        - on-sync-failed
+        
+  templates:
+    template.app-deployed: |
+      message: |
+        🚀 Application {{.app.metadata.name}} deployed successfully
+        Revision: {{.app.status.sync.revision}}
+        
+    template.app-health-degraded: |
+      message: |
+        ⚠️ Application {{.app.metadata.name}} health degraded
+        Status: {{.app.status.health.status}}
+        
+    template.app-sync-failed: |
+      message: |
+        ❌ Application {{.app.metadata.name}} sync failed
+        Error: {{.app.status.conditions}}
+        
+# ApplicationSet controller
+applicationSet:
+  enabled: true
+  replicas: 2
+  
+# Image Updater
+imageUpdater:
+  enabled: true
+  config:
+    registries:
+      - name: ghcr
+        api_url: https://ghcr.io
+        prefix: ghcr.io
+        credentials: secret:argocd/ghcr-creds#token
+        
+# Resource tracking
+resourceTracking:
+  method: annotation
+  
+# Security
+configs:
+  params:
+    server.insecure: false
+    server.disable.auth: false
+    
+  secret:
+    createSecret: false  # Using external secrets
+    
+# Backup
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: 30

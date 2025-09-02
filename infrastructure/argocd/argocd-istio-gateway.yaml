@@ -1,0 +1,69 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: argocd-gateway
+  namespace: argocd
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - argocd.192.168.7.241.nip.io
+      tls:
+        httpsRedirect: false  # Disable for now, enable with cert-manager
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - argocd.192.168.7.241.nip.io
+      tls:
+        mode: SIMPLE
+        credentialName: argocd-tls  # Will be created by cert-manager
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  hosts:
+    - argocd.192.168.7.241.nip.io
+  gateways:
+    - argocd-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: argocd-server
+            port:
+              number: 80
+      timeout: 300s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  host: argocd-server
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s

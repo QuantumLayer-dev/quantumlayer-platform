@@ -1,0 +1,94 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: quantumlayer
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: QuantumLayer Platform - Enterprise AI Software Factory
+  
+  # Source repositories
+  sourceRepos:
+    - https://github.com/QuantumLayer-dev/quantumlayer-platform
+    - https://charts.bitnami.com/bitnami
+    - https://argoproj.github.io/argo-helm
+    
+  # Destinations
+  destinations:
+    - namespace: quantumlayer
+      server: https://kubernetes.default.svc
+    - namespace: quantumlayer-staging
+      server: https://kubernetes.default.svc
+    - namespace: quantumlayer-dev
+      server: https://kubernetes.default.svc
+      
+  # Cluster resource allow list
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: ''
+      kind: ResourceQuota
+    - group: ''
+      kind: LimitRange
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+    - group: 'networking.istio.io'
+      kind: Gateway
+    - group: 'networking.istio.io'
+      kind: VirtualService
+    - group: 'networking.istio.io'
+      kind: DestinationRule
+    - group: 'cert-manager.io'
+      kind: Certificate
+    - group: 'cert-manager.io'
+      kind: ClusterIssuer
+    - group: 'monitoring.coreos.com'
+      kind: ServiceMonitor
+    - group: 'monitoring.coreos.com'
+      kind: PrometheusRule
+      
+  # Namespace resource allow list
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+      
+  # Roles
+  roles:
+    - name: admin
+      policies:
+        - p, proj:quantumlayer:admin, applications, *, quantumlayer/*, allow
+        - p, proj:quantumlayer:admin, repositories, *, *, allow
+      groups:
+        - quantumlayer:admins
+        
+    - name: developer
+      policies:
+        - p, proj:quantumlayer:developer, applications, get, quantumlayer/*, allow
+        - p, proj:quantumlayer:developer, applications, sync, quantumlayer/*, allow
+        - p, proj:quantumlayer:developer, applications, action/*, quantumlayer/*, allow
+      groups:
+        - quantumlayer:developers
+        
+    - name: viewer
+      policies:
+        - p, proj:quantumlayer:viewer, applications, get, quantumlayer/*, allow
+      groups:
+        - quantumlayer:viewers
+        
+  # Sync windows (maintenance windows)
+  syncWindows:
+    - kind: allow
+      schedule: '* * * * *'
+      duration: 24h
+      applications:
+        - '*'
+      manualSync: true
+    - kind: deny
+      schedule: '0 2-4 * * SUN'
+      duration: 2h
+      applications:
+        - '*-production'
+      manualSync: false
