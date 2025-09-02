@@ -6,17 +6,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/api"
+	// "github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/api"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/engine"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/templates"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/config"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 )
 
 func main() {
@@ -26,15 +26,22 @@ func main() {
 	logger.SetLevel(logrus.InfoLevel)
 
 	// Load configuration
-	if err := config.Load(); err != nil {
+	cfg, err := config.Load("meta-prompt-engine")
+	if err != nil {
 		logger.WithError(err).Fatal("Failed to load configuration")
 	}
 
 	// Initialize telemetry
-	if err := telemetry.Initialize("meta-prompt-engine"); err != nil {
+	tracer, cleanup, err := telemetry.InitTracer(
+		"meta-prompt-engine",
+		cfg.Tracing.Endpoint,
+		cfg.Tracing.SamplingRate,
+	)
+	if err != nil {
 		logger.WithError(err).Fatal("Failed to initialize telemetry")
 	}
-	defer telemetry.Shutdown()
+	defer cleanup()
+	_ = tracer // Will be used later
 
 	// Create LLM client (using mock for now)
 	llmClient := &MockLLMClient{logger: logger}
@@ -56,13 +63,13 @@ func main() {
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", viper.GetInt("PORT")),
+		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler: router,
 	}
 
 	// Start server in goroutine
 	go func() {
-		logger.WithField("port", viper.GetInt("PORT")).Info("Starting Meta Prompt Engine server")
+		logger.WithField("port", cfg.Server.Port).Info("Starting Meta Prompt Engine server")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.WithError(err).Fatal("Failed to start server")
 		}
@@ -91,7 +98,8 @@ func setupRouter(engine *engine.MetaPromptEngine, logger *logrus.Logger) *gin.En
 	
 	// Add middleware
 	router.Use(gin.Recovery())
-	router.Use(telemetry.GinMiddleware())
+	// TODO: Add telemetry middleware when implemented
+	// router.Use(telemetry.GinMiddleware())
 	
 	// Health check endpoints
 	router.GET("/health", func(c *gin.Context) {
@@ -102,34 +110,43 @@ func setupRouter(engine *engine.MetaPromptEngine, logger *logrus.Logger) *gin.En
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
-	// API routes
+	// API routes - TODO: Implement API handlers
 	v1 := router.Group("/api/v1")
 	{
-		// Template management
-		v1.POST("/templates", api.RegisterTemplate(engine))
-		v1.GET("/templates", api.ListTemplates(engine))
-		v1.GET("/templates/:id", api.GetTemplate(engine))
-		v1.PUT("/templates/:id", api.UpdateTemplate(engine))
-		v1.DELETE("/templates/:id", api.DeleteTemplate(engine))
+		// Placeholder endpoint
+		v1.GET("/status", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"service": "meta-prompt-engine",
+				"version": "1.0.0",
+				"status": "operational",
+			})
+		})
 		
-		// Template execution
-		v1.POST("/templates/:id/execute", api.ExecuteTemplate(engine))
+		// Template management - TODO
+		// v1.POST("/templates", api.RegisterTemplate(engine))
+		// v1.GET("/templates", api.ListTemplates(engine))
+		// v1.GET("/templates/:id", api.GetTemplate(engine))
+		// v1.PUT("/templates/:id", api.UpdateTemplate(engine))
+		// v1.DELETE("/templates/:id", api.DeleteTemplate(engine))
 		
-		// Chain management
-		v1.POST("/chains", api.CreateChain(engine))
-		v1.GET("/chains", api.ListChains(engine))
-		v1.POST("/chains/:id/execute", api.ExecuteChain(engine))
+		// Template execution - TODO
+		// v1.POST("/templates/:id/execute", api.ExecuteTemplate(engine))
 		
-		// A/B testing
-		v1.POST("/ab-tests", api.StartABTest(engine))
-		v1.GET("/ab-tests/:id", api.GetABTestResults(engine))
-		v1.PUT("/ab-tests/:id/stop", api.StopABTest(engine))
+		// Chain management - TODO
+		// v1.POST("/chains", api.CreateChain(engine))
+		// v1.GET("/chains", api.ListChains(engine))
+		// v1.POST("/chains/:id/execute", api.ExecuteChain(engine))
 		
-		// Feedback
-		v1.POST("/executions/:id/feedback", api.RecordFeedback(engine))
+		// A/B testing - TODO
+		// v1.POST("/ab-tests", api.StartABTest(engine))
+		// v1.GET("/ab-tests/:id", api.GetABTestResults(engine))
+		// v1.PUT("/ab-tests/:id/stop", api.StopABTest(engine))
 		
-		// Recommendations
-		v1.GET("/recommendations", api.GetRecommendations(engine))
+		// Feedback - TODO
+		// v1.POST("/executions/:id/feedback", api.RecordFeedback(engine))
+		
+		// Recommendations - TODO
+		// v1.GET("/recommendations", api.GetRecommendations(engine))
 	}
 
 	return router

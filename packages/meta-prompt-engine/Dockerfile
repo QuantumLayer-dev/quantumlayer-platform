@@ -1,55 +1,58 @@
-# Build stage
+# Production Dockerfile for Meta Prompt Engine
+# Enterprise-grade, multi-stage build
+
 FROM golang:1.21-alpine AS builder
 
-# Install dependencies
-RUN apk add --no-cache git
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod files
-COPY go.mod go.sum ./
-COPY packages/meta-prompt-engine/go.mod packages/meta-prompt-engine/go.sum packages/meta-prompt-engine/
+# Copy all required files
+COPY packages/meta-prompt-engine/ ./
+COPY packages/shared/ ./shared/
+
+# Fix module replacement
+RUN go mod edit -replace github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared=./shared
 
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY packages/shared/ packages/shared/
-COPY packages/meta-prompt-engine/ packages/meta-prompt-engine/
+# Build arguments
+ARG VERSION=latest
+ARG BUILD_TIME
 
-# Build the application
-WORKDIR /app/packages/meta-prompt-engine
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server cmd/server/main.go
+# Build the binary with proper flags
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath \
+    -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
+    -o server \
+    cmd/server/main.go
 
-# Final stage
-FROM alpine:latest
+# Final production image
+FROM gcr.io/distroless/static:nonroot
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+# Copy timezone and certificates
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Create non-root user
-RUN addgroup -g 1000 -S appuser && \
-    adduser -u 1000 -S appuser -G appuser
+# Copy the binary
+COPY --from=builder /build/server /server
 
-# Set working directory
-WORKDIR /app
+# Use non-root user
+USER nonroot:nonroot
 
-# Copy binary from builder
-COPY --from=builder /app/packages/meta-prompt-engine/server .
-
-# Change ownership
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
-# Expose port
-EXPOSE 8080
+# Expose ports
+EXPOSE 8080 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+    CMD ["/server", "--health-check"]
 
-# Run the application
-CMD ["./server"]
+# Metadata
+LABEL org.opencontainers.image.source="https://github.com/QuantumLayer-dev/quantumlayer-platform" \
+      org.opencontainers.image.title="Meta Prompt Engine" \
+      org.opencontainers.image.description="Enterprise AI Prompt Optimization Engine" \
+      org.opencontainers.image.vendor="QuantumLayer"
+
+ENTRYPOINT ["/server"]

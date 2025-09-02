@@ -48,9 +48,9 @@ Provide the code in a markdown code block.`,
 			Category: "code_generation",
 			Template: `Refactor the following {{.language}} code to improve its quality:
 
-\`\`\`{{.language}}
+` + "```{{.language}}" + `
 {{.code}}
-\`\`\`
+` + "```" + `
 
 Refactoring Goals:
 {{range .goals}}
@@ -80,9 +80,9 @@ Provide the refactored code with explanations for major changes.`,
 			Category: "testing",
 			Template: `Generate comprehensive {{.test_type}} tests for the following code:
 
-\`\`\`{{.language}}
+"` + "```" + `"{{.language}}
 {{.code}}
-\`\`\`
+"` + "```" + `"
 
 Test Framework: {{.framework}}
 
@@ -119,16 +119,16 @@ Generate the complete test file.`,
 Endpoint: {{.method}} {{.path}}
 {{if .request_body}}
 Request Body:
-\`\`\`json
+"` + "```" + `"json
 {{.request_body}}
-\`\`\`
+"` + "```" + `"
 {{end}}
 
 {{if .response_body}}
 Response Body:
-\`\`\`json
+"` + "```" + `"json
 {{.response_body}}
-\`\`\`
+"` + "```" + `"
 {{end}}
 
 Documentation Format: {{.format}}
@@ -158,9 +158,9 @@ Include:
 			Category: "review",
 			Template: `Perform a thorough code review of the following {{.language}} code:
 
-\`\`\`{{.language}}
+"` + "```" + `"{{.language}}
 {{.code}}
-\`\`\`
+"` + "```" + `"
 
 Review Criteria:
 - Code quality and readability
@@ -228,9 +228,9 @@ Provide:
 			Category: "security",
 			Template: `Perform a security audit on the following code:
 
-\`\`\`{{.language}}
+"` + "```" + `"{{.language}}
 {{.code}}
-\`\`\`
+"` + "```" + `"
 
 Security Focus Areas:
 - Input validation
@@ -262,9 +262,9 @@ Provide:
 			Category: "performance",
 			Template: `Analyze and optimize the performance of the following code:
 
-\`\`\`{{.language}}
+"` + "```" + `"{{.language}}
 {{.code}}
-\`\`\`
+"` + "```" + `"
 
 Performance Metrics:
 - Current: {{.current_metrics}}
@@ -294,9 +294,9 @@ Provide optimized code with performance improvement estimates.`,
 			Category: "database",
 			Template: `Optimize the following SQL query:
 
-\`\`\`sql
+"` + "```" + `"sql
 {{.query}}
-\`\`\`
+"` + "```" + `"
 
 Database: {{.database_type}}
 Table Sizes: {{.table_info}}
@@ -330,9 +330,9 @@ Error Message:
 {{.error}}
 
 Code:
-\`\`\`{{.language}}
+"` + "```" + `"{{.language}}
 {{.code}}
-\`\`\`
+"` + "```" + `"
 
 {{if .stack_trace}}
 Stack Trace:

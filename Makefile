@@ -139,4 +139,67 @@ validate: ## Validate configuration files
 	@docker-compose config
 	@echo "${GREEN}Configuration is valid${NC}"
 
+# ==================== ENTERPRISE BUILD TARGETS ====================
+
+# Docker Registry Configuration
+REGISTRY := ghcr.io
+ORG := quantumlayer-dev
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "latest")
+BUILD_TIME := $(shell date -u +%Y%m%d-%H%M%S)
+
+# Production Docker Build
+docker-build-meta-prompt: ## Build Meta Prompt Engine Docker image
+	@echo "${GREEN}Building Meta Prompt Engine Docker image...${NC}"
+	@docker build \
+		--tag $(REGISTRY)/$(ORG)/meta-prompt-engine:$(VERSION) \
+		--tag $(REGISTRY)/$(ORG)/meta-prompt-engine:latest \
+		--file packages/meta-prompt-engine/Dockerfile \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		.
+	@echo "${GREEN}Build complete: $(REGISTRY)/$(ORG)/meta-prompt-engine:$(VERSION)${NC}"
+
+docker-build-agent-ensemble: ## Build Agent Ensemble Docker image
+	@echo "${GREEN}Building Agent Ensemble Docker image...${NC}"
+	@docker build \
+		--tag $(REGISTRY)/$(ORG)/agent-ensemble:$(VERSION) \
+		--tag $(REGISTRY)/$(ORG)/agent-ensemble:latest \
+		--file packages/agent-ensemble/Dockerfile \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		.
+	@echo "${GREEN}Build complete: $(REGISTRY)/$(ORG)/agent-ensemble:$(VERSION)${NC}"
+
+docker-push-meta-prompt: ## Push Meta Prompt Engine to GHCR
+	@echo "${GREEN}Pushing Meta Prompt Engine to GHCR...${NC}"
+	@docker push $(REGISTRY)/$(ORG)/meta-prompt-engine:$(VERSION)
+	@docker push $(REGISTRY)/$(ORG)/meta-prompt-engine:latest
+	@echo "${GREEN}Push complete${NC}"
+
+docker-push-agent-ensemble: ## Push Agent Ensemble to GHCR
+	@echo "${GREEN}Pushing Agent Ensemble to GHCR...${NC}"
+	@docker push $(REGISTRY)/$(ORG)/agent-ensemble:$(VERSION)
+	@docker push $(REGISTRY)/$(ORG)/agent-ensemble:latest
+	@echo "${GREEN}Push complete${NC}"
+
+# Enterprise Deployment
+deploy-argocd: ## Deploy services via ArgoCD
+	@echo "${GREEN}Deploying via ArgoCD...${NC}"
+	@kubectl apply -f infrastructure/argocd/applications/
+	@echo "${GREEN}ArgoCD applications created${NC}"
+
+# Production Status
+prod-status: ## Check production Kubernetes status
+	@echo "${GREEN}Production Status:${NC}"
+	@kubectl get pods -n quantumlayer
+	@echo ""
+	@kubectl get svc -n quantumlayer
+	@echo ""
+	@kubectl get ingress -n quantumlayer 2>/dev/null || true
+
+# CI/CD Pipeline
+ci-pipeline: lint test docker-build-meta-prompt docker-build-agent-ensemble ## Run full CI pipeline
+
+cd-pipeline: docker-push-meta-prompt docker-push-agent-ensemble deploy-argocd ## Run full CD pipeline
+
 .DEFAULT_GOAL := help

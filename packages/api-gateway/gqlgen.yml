@@ -1,0 +1,15 @@
+schema:
+  - packages/api-gateway/graph/*.graphql
+
+exec:
+  filename: packages/api-gateway/graph/generated.go
+
+model:
+  filename: packages/api-gateway/graph/model.go
+
+resolver:
+  layout: follow-schema
+  dir: packages/api-gateway/graph
+  filename_template: "{name}.resolvers.go"
+
+struct_tag: json

@@ -1,0 +1,474 @@
+"""
+QuantumLayer Platform GraphQL API
+Enterprise AI Software Factory
+"""
+
+scalar Time
+scalar JSON
+
+# ==================== Root Types ====================
+
+type Query {
+  # Health & Status
+  health: HealthStatus!
+  systemStatus: SystemStatus!
+  
+  # Projects
+  project(id: ID!): Project
+  projects(filter: ProjectFilter, pagination: Pagination): ProjectConnection!
+  
+  # Code Generation
+  codeGeneration(id: ID!): CodeGeneration
+  codeGenerations(projectId: ID!, pagination: Pagination): CodeGenerationConnection!
+  
+  # Templates
+  promptTemplate(id: ID!): PromptTemplate
+  promptTemplates(category: String, pagination: Pagination): PromptTemplateConnection!
+  
+  # Agents
+  agent(id: ID!): Agent
+  agents(type: AgentType, pagination: Pagination): AgentConnection!
+  
+  # Metrics
+  metrics(timeRange: TimeRange!): Metrics!
+}
+
+type Mutation {
+  # Projects
+  createProject(input: CreateProjectInput!): Project!
+  updateProject(id: ID!, input: UpdateProjectInput!): Project!
+  deleteProject(id: ID!): Boolean!
+  
+  # Code Generation
+  generateCode(input: GenerateCodeInput!): CodeGeneration!
+  regenerateCode(id: ID!, input: RegenerateCodeInput): CodeGeneration!
+  
+  # Templates
+  createPromptTemplate(input: CreatePromptTemplateInput!): PromptTemplate!
+  updatePromptTemplate(id: ID!, input: UpdatePromptTemplateInput!): PromptTemplate!
+  deletePromptTemplate(id: ID!): Boolean!
+  
+  # Agent Operations
+  executeAgent(input: ExecuteAgentInput!): AgentExecution!
+  stopAgent(executionId: ID!): Boolean!
+}
+
+type Subscription {
+  # Real-time code generation updates
+  codeGenerationUpdates(generationId: ID!): CodeGenerationUpdate!
+  
+  # Agent execution updates
+  agentExecutionUpdates(executionId: ID!): AgentExecutionUpdate!
+  
+  # System events
+  systemEvents(types: [EventType!]): SystemEvent!
+}
+
+# ==================== Core Types ====================
+
+type Project {
+  id: ID!
+  name: String!
+  description: String
+  language: ProgrammingLanguage!
+  framework: String
+  status: ProjectStatus!
+  createdAt: Time!
+  updatedAt: Time!
+  
+  # Relationships
+  codeGenerations(pagination: Pagination): CodeGenerationConnection!
+  deployments(pagination: Pagination): DeploymentConnection!
+  metrics: ProjectMetrics!
+}
+
+type CodeGeneration {
+  id: ID!
+  projectId: ID!
+  prompt: String!
+  status: GenerationStatus!
+  language: ProgrammingLanguage!
+  framework: String
+  
+  # Results
+  code: String
+  tests: String
+  documentation: String
+  dockerfile: String
+  
+  # Metadata
+  tokensUsed: Int!
+  executionTime: Float!
+  cost: Float!
+  quality: QualityMetrics
+  
+  createdAt: Time!
+  completedAt: Time
+  
+  # Relationships
+  project: Project!
+  agent: Agent
+  feedback: [Feedback!]!
+}
+
+type Agent {
+  id: ID!
+  name: String!
+  type: AgentType!
+  specialization: String!
+  status: AgentStatus!
+  capabilities: [String!]!
+  
+  # Performance
+  successRate: Float!
+  averageExecutionTime: Float!
+  totalExecutions: Int!
+  
+  # Current state
+  currentTask: String
+  isAvailable: Boolean!
+}
+
+type PromptTemplate {
+  id: ID!
+  name: String!
+  category: String!
+  template: String!
+  variables: [TemplateVariable!]!
+  
+  # Usage stats
+  usageCount: Int!
+  successRate: Float!
+  averageQuality: Float!
+  
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type TemplateVariable {
+  name: String!
+  type: String!
+  required: Boolean!
+  defaultValue: String
+  description: String
+}
+
+type Feedback {
+  id: ID!
+  userId: ID!
+  rating: Int!
+  comment: String
+  createdAt: Time!
+}
+
+type Deployment {
+  id: ID!
+  projectId: ID!
+  environment: String!
+  status: DeploymentStatus!
+  url: String
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type ProjectMetrics {
+  totalGenerations: Int!
+  successRate: Float!
+  averageQuality: Float!
+  totalCost: Float!
+  lastActivityAt: Time
+}
+
+# ==================== Input Types ====================
+
+input CreateProjectInput {
+  name: String!
+  description: String
+  language: ProgrammingLanguage!
+  framework: String
+  requirements: String
+}
+
+input GenerateCodeInput {
+  projectId: ID!
+  prompt: String!
+  language: ProgrammingLanguage!
+  framework: String
+  includeTests: Boolean = true
+  includeDocumentation: Boolean = true
+  includeDocker: Boolean = false
+  templateId: ID
+}
+
+input ExecuteAgentInput {
+  agentType: AgentType!
+  task: String!
+  context: JSON
+  priority: Priority = NORMAL
+}
+
+# ==================== Enums ====================
+
+enum ProgrammingLanguage {
+  PYTHON
+  JAVASCRIPT
+  TYPESCRIPT
+  GO
+  RUST
+  JAVA
+  CSHARP
+  RUBY
+  PHP
+  SWIFT
+  KOTLIN
+  SCALA
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum GenerationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentType {
+  ARCHITECT
+  DEVELOPER
+  TESTER
+  REVIEWER
+  OPTIMIZER
+  DOCUMENTER
+  DEPLOYER
+  MONITOR
+}
+
+enum AgentStatus {
+  IDLE
+  BUSY
+  OFFLINE
+  ERROR
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum EventType {
+  GENERATION_STARTED
+  GENERATION_COMPLETED
+  AGENT_STARTED
+  AGENT_COMPLETED
+  ERROR
+  WARNING
+}
+
+enum DeploymentStatus {
+  PENDING
+  IN_PROGRESS
+  DEPLOYED
+  FAILED
+  ROLLED_BACK
+}
+
+# ==================== Utility Types ====================
+
+type HealthStatus {
+  status: String!
+  services: [ServiceHealth!]!
+  timestamp: Time!
+}
+
+type ServiceHealth {
+  name: String!
+  status: String!
+  latency: Float!
+  errorRate: Float!
+}
+
+type SystemStatus {
+  version: String!
+  uptime: Int!
+  activeAgents: Int!
+  queuedTasks: Int!
+  completedToday: Int!
+}
+
+type Metrics {
+  codeGenerated: Int!
+  testsGenerated: Int!
+  successRate: Float!
+  averageQuality: Float!
+  totalCost: Float!
+  activeProjects: Int!
+}
+
+type QualityMetrics {
+  syntaxScore: Float!
+  structureScore: Float!
+  bestPracticesScore: Float!
+  securityScore: Float!
+  performanceScore: Float!
+  overallScore: Float!
+}
+
+# ==================== Pagination ====================
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+  totalCount: Int!
+}
+
+input Pagination {
+  first: Int
+  after: String
+  last: Int
+  before: String
+}
+
+type ProjectConnection {
+  edges: [ProjectEdge!]!
+  pageInfo: PageInfo!
+}
+
+type ProjectEdge {
+  cursor: String!
+  node: Project!
+}
+
+type CodeGenerationConnection {
+  edges: [CodeGenerationEdge!]!
+  pageInfo: PageInfo!
+}
+
+type CodeGenerationEdge {
+  cursor: String!
+  node: CodeGeneration!
+}
+
+type PromptTemplateConnection {
+  edges: [PromptTemplateEdge!]!
+  pageInfo: PageInfo!
+}
+
+type PromptTemplateEdge {
+  cursor: String!
+  node: PromptTemplate!
+}
+
+type AgentConnection {
+  edges: [AgentEdge!]!
+  pageInfo: PageInfo!
+}
+
+type AgentEdge {
+  cursor: String!
+  node: Agent!
+}
+
+type DeploymentConnection {
+  edges: [DeploymentEdge!]!
+  pageInfo: PageInfo!
+}
+
+type DeploymentEdge {
+  cursor: String!
+  node: Deployment!
+}
+
+# Real-time update types
+type CodeGenerationUpdate {
+  id: ID!
+  status: GenerationStatus!
+  progress: Float!
+  message: String
+  code: String
+  error: String
+}
+
+type AgentExecution {
+  id: ID!
+  agentId: ID!
+  task: String!
+  status: GenerationStatus!
+  result: JSON
+  error: String
+  startedAt: Time!
+  completedAt: Time
+}
+
+type AgentExecutionUpdate {
+  id: ID!
+  status: GenerationStatus!
+  progress: Float!
+  message: String
+  result: JSON
+  error: String
+}
+
+type SystemEvent {
+  id: ID!
+  type: EventType!
+  message: String!
+  metadata: JSON
+  timestamp: Time!
+}
+
+# Filter types
+input ProjectFilter {
+  language: ProgrammingLanguage
+  status: ProjectStatus
+  searchTerm: String
+}
+
+input TimeRange {
+  start: Time!
+  end: Time!
+}
+
+# Additional input types
+input UpdateProjectInput {
+  name: String
+  description: String
+  status: ProjectStatus
+}
+
+input RegenerateCodeInput {
+  prompt: String
+  templateId: ID
+}
+
+input CreatePromptTemplateInput {
+  name: String!
+  category: String!
+  template: String!
+  variables: [TemplateVariableInput!]!
+}
+
+input UpdatePromptTemplateInput {
+  name: String
+  category: String
+  template: String
+  variables: [TemplateVariableInput!]
+}
+
+input TemplateVariableInput {
+  name: String!
+  type: String!
+  required: Boolean!
+  defaultValue: String
+  description: String
+}

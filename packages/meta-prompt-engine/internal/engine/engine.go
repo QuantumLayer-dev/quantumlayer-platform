@@ -3,7 +3,6 @@ package engine
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -12,9 +11,9 @@ import (
 	"time"
 
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/models"
-	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/telemetry"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -43,7 +42,7 @@ func NewMetaPromptEngine(llmClient LLMClient, logger *logrus.Logger) *MetaPrompt
 		abTests:    make(map[string]*models.ABTestConfig),
 		executions: []models.PromptExecution{},
 		logger:     logger,
-		tracer:     telemetry.GetTracer("meta-prompt-engine"),
+		tracer:     otel.Tracer("meta-prompt-engine"),
 		llmClient:  llmClient,
 		optimizer:  NewPromptOptimizer(logger),
 	}
@@ -273,15 +272,15 @@ func (e *MetaPromptEngine) GetTemplateRecommendations(task string, limit int) []
 
 // Private helper methods
 
-func (e *MetaPromptEngine) validateTemplate(template *models.PromptTemplate) error {
+func (e *MetaPromptEngine) validateTemplate(tmpl *models.PromptTemplate) error {
 	// Parse template to check syntax
-	_, err := template.ParseTemplate(template.Template)
+	_, err := template.New("validate").Parse(tmpl.Template)
 	if err != nil {
 		return fmt.Errorf("template syntax error: %w", err)
 	}
 	
 	// Validate variables
-	for _, v := range template.Variables {
+	for _, v := range tmpl.Variables {
 		if v.Name == "" {
 			return fmt.Errorf("variable must have a name")
 		}
