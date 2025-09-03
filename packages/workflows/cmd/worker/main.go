@@ -45,14 +45,27 @@ func main() {
 
 	// Register workflows
 	w.RegisterWorkflow(workflows.CodeGenerationWorkflow)
+	w.RegisterWorkflow(workflows.ExtendedCodeGenerationWorkflow) // New extended workflow
 
-	// Register activities
+	// Register activities - original
 	w.RegisterActivity(activities.EnhancePromptActivity)
 	w.RegisterActivity(activities.ParseRequirementsActivity)
 	w.RegisterActivity(activities.GenerateCodeActivity)
 	w.RegisterActivity(activities.ValidateCodeActivity)
 	w.RegisterActivity(activities.GenerateTestsActivity)
 	w.RegisterActivity(activities.GenerateDocumentationActivity)
+	
+	// Register activities - extended
+	w.RegisterActivity(activities.GenerateFRDActivity)
+	w.RegisterActivity(activities.GenerateProjectStructureActivity)
+	w.RegisterActivity(activities.ValidateSemanticActivity)
+	w.RegisterActivity(activities.ApplyFeedbackLoopActivity)
+	w.RegisterActivity(activities.ResolveDependenciesActivity)
+	w.RegisterActivity(activities.GenerateTestPlanActivity)
+	w.RegisterActivity(activities.PerformSecurityScanActivity)
+	w.RegisterActivity(activities.AnalyzePerformanceActivity)
+	w.RegisterActivity(activities.GenerateReadmeActivity)
+	w.RegisterActivity(activities.StoreQuantumDropActivity)
 
 	logger.Info("Starting Temporal worker",
 		zap.String("taskQueue", workflows.CodeGenerationTaskQueue),

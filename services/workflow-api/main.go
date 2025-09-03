@@ -74,6 +74,9 @@ func main() {
 
 	// Trigger code generation workflow
 	r.POST("/api/v1/workflows/generate", handleGenerateCode)
+	
+	// Trigger extended code generation workflow
+	r.POST("/api/v1/workflows/generate-extended", handleGenerateExtendedCode)
 
 	// Get workflow status
 	r.GET("/api/v1/workflows/:id", handleGetWorkflow)
@@ -158,6 +161,51 @@ func handleGetWorkflow(c *gin.Context) {
 		"status":      status,
 		"start_time":  resp.WorkflowExecutionInfo.StartTime,
 		"close_time":  resp.WorkflowExecutionInfo.CloseTime,
+	})
+}
+
+func handleGenerateExtendedCode(c *gin.Context) {
+	var req CodeGenerationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate request ID if not provided
+	if req.ID == "" {
+		req.ID = uuid.New().String()
+	}
+
+	// Create workflow ID
+	workflowID := fmt.Sprintf("extended-code-gen-%s", req.ID)
+
+	// Workflow options
+	options := client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: "code-generation",
+		WorkflowExecutionTimeout: 10 * time.Minute, // Extended timeout
+	}
+
+	// Start extended workflow
+	we, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		options,
+		"ExtendedCodeGenerationWorkflow", // Use extended workflow
+		req,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to start extended workflow",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, WorkflowResponse{
+		WorkflowID: we.GetID(),
+		RunID:      we.GetRunID(),
+		Status:     "started",
+		Message:    "Extended workflow started successfully (12 stages)",
 	})
 }
 

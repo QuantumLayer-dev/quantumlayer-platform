@@ -127,3 +127,47 @@ type AgentResult struct {
 	Output   string `json:"output"`
 	Metadata map[string]interface{} `json:"metadata"`
 }
+
+// QuantumDrop represents an intermediate generation artifact
+type QuantumDrop struct {
+	ID         string                 `json:"id"`
+	WorkflowID string                 `json:"workflow_id"`
+	Stage      string                 `json:"stage"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Artifact   string                 `json:"artifact"`
+	Type       string                 `json:"type"` // prompt, frd, code, tests, etc.
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ExtendedGenerationResult for the 12-stage workflow
+type ExtendedGenerationResult struct {
+	ID                 string              `json:"id"`
+	RequestID          string              `json:"requestId"`
+	Success            bool                `json:"success"`
+	Code               string              `json:"code"`
+	FRD                string              `json:"frd,omitempty"`
+	TestPlan           string              `json:"testPlan,omitempty"`
+	Tests              string              `json:"tests,omitempty"`
+	Documentation      string              `json:"documentation,omitempty"`
+	SecurityReport     string              `json:"securityReport,omitempty"`
+	PerformanceReport  string              `json:"performanceReport,omitempty"`
+	ProjectStructure   map[string]string   `json:"projectStructure,omitempty"`
+	Dependencies       []string            `json:"dependencies,omitempty"`
+	Files              []GeneratedFile     `json:"files"`
+	QuantumDrops       []QuantumDrop       `json:"quantumDrops"`
+	ValidationResults  ValidationResults   `json:"validationResults"`
+	FeedbackIterations int                 `json:"feedbackIterations"`
+	Metrics            GenerationMetrics   `json:"metrics"`
+	Errors             []string            `json:"errors,omitempty"`
+	CompletedAt        time.Time           `json:"completedAt"`
+}
+
+// ValidationResults aggregates all validation scores
+type ValidationResults struct {
+	SemanticValid    bool     `json:"semanticValid"`
+	SemanticIssues   []Issue  `json:"semanticIssues,omitempty"`
+	SecurityScore    float64  `json:"securityScore"`
+	SecurityIssues   []string `json:"securityIssues,omitempty"`
+	PerformanceScore float64  `json:"performanceScore"`
+	TestCoverage     float64  `json:"testCoverage"`
+}
