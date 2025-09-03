@@ -1,0 +1,162 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qsecure-engine
+  namespace: quantumlayer
+  labels:
+    app: qsecure-engine
+    component: security
+    product-path: qsecure
+    version: ai-native-v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: qsecure-engine
+  template:
+    metadata:
+      labels:
+        app: qsecure-engine
+        component: security
+        product-path: qsecure
+    spec:
+      containers:
+      - name: qsecure-engine
+        image: ghcr.io/quantumlayer-dev/qsecure-engine:ai-native-v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8096
+          name: http
+        env:
+        - name: PORT
+          value: "8096"
+        - name: LLM_ROUTER_URL
+          value: "http://llm-router:8080"
+        - name: AI_DECISION_ENGINE_URL
+          value: "http://ai-decision-engine:8095"
+        - name: VECTOR_DB_URL
+          value: "http://qdrant:6333"
+        - name: TEMPORAL_URL
+          value: "temporal-frontend:7233"
+        - name: SECURITY_RULES_PATH
+          value: "/etc/qsecure/rules"
+        - name: COMPLIANCE_STANDARDS
+          value: "OWASP,CWE,GDPR,HIPAA,PCI-DSS,SOC2"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8096
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8096
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: security-rules
+          mountPath: /etc/qsecure/rules
+        - name: compliance-templates
+          mountPath: /etc/qsecure/compliance
+      volumes:
+      - name: security-rules
+        configMap:
+          name: qsecure-rules
+      - name: compliance-templates
+        configMap:
+          name: qsecure-compliance
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qsecure-engine
+  namespace: quantumlayer
+  labels:
+    app: qsecure-engine
+    product-path: qsecure
+spec:
+  type: ClusterIP
+  selector:
+    app: qsecure-engine
+  ports:
+  - port: 8096
+    targetPort: 8096
+    protocol: TCP
+    name: http
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qsecure-rules
+  namespace: quantumlayer
+data:
+  owasp_rules.yaml: |
+    rules:
+      - id: SQL_INJECTION
+        cwe: CWE-89
+        severity: CRITICAL
+        pattern: "(SELECT|INSERT|UPDATE|DELETE).*FROM.*WHERE"
+        description: "Potential SQL injection vulnerability"
+      - id: XSS
+        cwe: CWE-79
+        severity: HIGH
+        pattern: "<script.*>.*</script>"
+        description: "Cross-site scripting vulnerability"
+      - id: PATH_TRAVERSAL
+        cwe: CWE-22
+        severity: HIGH
+        pattern: "\.\./(\.\./)?"
+        description: "Path traversal vulnerability"
+      - id: HARDCODED_SECRET
+        cwe: CWE-798
+        severity: CRITICAL
+        pattern: "(api_key|secret|password|token)\s*=\s*['\"][^'\"]+['\"]"
+        description: "Hardcoded credential detected"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qsecure-compliance
+  namespace: quantumlayer
+data:
+  gdpr.yaml: |
+    standard: GDPR
+    version: "2016/679"
+    requirements:
+      - id: GDPR_ART_25
+        title: "Data protection by design and by default"
+        checks:
+          - encryption_at_rest
+          - encryption_in_transit
+          - data_minimization
+      - id: GDPR_ART_32
+        title: "Security of processing"
+        checks:
+          - access_controls
+          - audit_logging
+          - incident_response
+  pci_dss.yaml: |
+    standard: PCI-DSS
+    version: "4.0"
+    requirements:
+      - id: PCI_REQ_2
+        title: "Do not use vendor-supplied defaults"
+        checks:
+          - no_default_passwords
+          - secure_configurations
+      - id: PCI_REQ_6
+        title: "Develop and maintain secure systems"
+        checks:
+          - secure_coding_practices
+          - regular_security_testing
