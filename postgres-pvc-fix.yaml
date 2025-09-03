@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-cluster-1
+  namespace: quantumlayer
+  labels:
+    cnpg.io/cluster: postgres-cluster
+    cnpg.io/instanceName: postgres-cluster-1
+    role: primary
+spec:
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
