@@ -1,0 +1,9 @@
+# Set temporal namespace to STRICT mTLS for consistency
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: temporal
+spec:
+  mtls:
+    mode: STRICT

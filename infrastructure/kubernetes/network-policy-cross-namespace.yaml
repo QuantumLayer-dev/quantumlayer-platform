@@ -1,0 +1,62 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-temporal-to-quantumlayer
+  namespace: quantumlayer
+spec:
+  podSelector: {}  # Apply to all pods in quantumlayer namespace
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: temporal
+    - namespaceSelector:
+        matchLabels:
+          name: quantumlayer
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+    - protocol: TCP
+      port: 8083
+    - protocol: TCP
+      port: 8086
+    - protocol: TCP
+      port: 8090
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-quantumlayer-to-temporal
+  namespace: temporal
+spec:
+  podSelector: {}  # Apply to all pods in temporal namespace
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: quantumlayer
+    - namespaceSelector:
+        matchLabels:
+          name: temporal
+    - namespaceSelector:
+        matchLabels:
+          name: istio-system
+    ports:
+    - protocol: TCP
+      port: 7233
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8088

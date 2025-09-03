@@ -1,0 +1,11 @@
+# Explicit DestinationRule to force ISTIO_MUTUAL mTLS
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: quantum-drops-mtls
+  namespace: temporal
+spec:
+  host: quantum-drops.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

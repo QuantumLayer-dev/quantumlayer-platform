@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-drops
+  namespace: temporal
+spec:
+  selector:
+    app: quantum-drops
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-drops
+  namespace: temporal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quantum-drops
+  template:
+    metadata:
+      labels:
+        app: quantum-drops
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      initContainers:
+      - name: init-db
+        image: postgres:15
+        command: ['sh', '-c']
+        args:
+          - |
+            until pg_isready -h postgres-postgresql.temporal.svc.cluster.local -p 5432; do
+              echo "Waiting for postgres to be ready..."
+              sleep 2
+            done
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres-postgresql.temporal.svc.cluster.local -U postgres -d postgres <<EOF
+            CREATE DATABASE IF NOT EXISTS quantum_drops;
+            \c quantum_drops;
+            CREATE TABLE IF NOT EXISTS quantum_drops (
+                id VARCHAR(255) PRIMARY KEY,
+                workflow_id VARCHAR(255),
+                stage VARCHAR(100),
+                timestamp TIMESTAMP,
+                artifact TEXT,
+                type VARCHAR(50),
+                metadata JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_workflow_id ON quantum_drops(workflow_id);
+            CREATE INDEX IF NOT EXISTS idx_stage ON quantum_drops(stage);
+            CREATE INDEX IF NOT EXISTS idx_type ON quantum_drops(type);
+            CREATE INDEX IF NOT EXISTS idx_timestamp ON quantum_drops(timestamp);
+            EOF
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-postgresql
+              key: postgres-password
+      containers:
+      - name: quantum-drops
+        image: ghcr.io/quantumlayer-dev/quantum-drops:v1.0.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          value: "postgres://postgres:$(POSTGRES_PASSWORD)@postgres-postgresql.temporal.svc.cluster.local:5432/quantum_drops?sslmode=disable"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-postgresql
+              key: postgres-password
+        - name: PORT
+          value: "8080"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"

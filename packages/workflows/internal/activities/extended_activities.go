@@ -932,7 +932,7 @@ func StoreQuantumDropActivity(ctx context.Context, drop types.QuantumDrop) error
 	// Get QuantumDrops service URL from environment
 	dropsURL := os.Getenv("QUANTUM_DROPS_URL")
 	if dropsURL == "" {
-		dropsURL = "http://quantum-drops.quantumlayer.svc.cluster.local:8080"
+		dropsURL = "http://quantum-drops.quantumlayer.svc.cluster.local:8090"
 	}
 
 	// Prepare the request

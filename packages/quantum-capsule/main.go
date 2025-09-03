@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	capsule "github.com/QuantumLayer-dev/quantumlayer-platform/packages/quantum-capsule"
+	capsule "github.com/QuantumLayer-dev/quantumlayer-platform/packages/quantum-capsule/capsule"
 )
 
 // CapsuleRequest for creating a new capsule

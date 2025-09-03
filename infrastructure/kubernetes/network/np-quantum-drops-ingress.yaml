@@ -1,0 +1,23 @@
+# Simple, precise NetworkPolicy for quantum-drops ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-quantum-drops-ingress
+  namespace: quantumlayer
+spec:
+  podSelector:
+    matchLabels:
+      app: quantum-drops
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: temporal     # Allow from temporal namespace
+        - namespaceSelector:
+            matchLabels:
+              name: quantumlayer # Allow same-namespace (probes/sidecars)
+      ports:
+        - protocol: TCP
+          port: 8090

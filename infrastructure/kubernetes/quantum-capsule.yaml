@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: quantum-capsule
+  namespace: quantumlayer
+spec:
+  selector:
+    app: quantum-capsule
+  ports:
+    - port: 8090
+      targetPort: 8090
+      protocol: TCP
+      nodePort: 30090
+  type: NodePort
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quantum-capsule
+  namespace: quantumlayer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quantum-capsule
+  template:
+    metadata:
+      labels:
+        app: quantum-capsule
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+      - name: quantum-capsule
+        image: ghcr.io/quantumlayer-dev/quantum-capsule:v1.0.0
+        ports:
+        - containerPort: 8090
+        env:
+        - name: WORKFLOW_API_URL
+          value: "http://workflow-api.temporal.svc.cluster.local:8080"
+        - name: QUANTUM_DROPS_URL
+          value: "http://quantum-drops.quantumlayer.svc.cluster.local:8080"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8090
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8090
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"

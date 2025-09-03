@@ -1,0 +1,154 @@
+# Production-grade Istio configuration for cross-namespace communication
+# This enables secure mTLS communication between temporal and quantumlayer namespaces
+
+---
+# Allow quantum-drops to accept connections with PERMISSIVE mTLS
+# This is required for cross-namespace communication when the calling namespace
+# doesn't have STRICT mTLS configured
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: quantum-drops-permissive
+  namespace: quantumlayer
+spec:
+  selector:
+    matchLabels:
+      app: quantum-drops
+  mtls:
+    mode: PERMISSIVE
+
+---
+# DestinationRule to ensure proper load balancing and connection pooling
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: quantum-drops
+  namespace: quantumlayer
+spec:
+  host: quantum-drops.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        h2MaxRequests: 100
+        maxRequestsPerConnection: 2
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+
+---
+# ServiceEntry to explicitly define the service for cross-namespace discovery
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: quantum-drops-external
+  namespace: temporal
+spec:
+  hosts:
+  - quantum-drops.quantumlayer.svc.cluster.local
+  location: MESH_EXTERNAL
+  ports:
+  - number: 8090
+    name: http
+    protocol: HTTP
+  resolution: DNS
+
+---
+# VirtualService for traffic management and retry logic
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: quantum-drops
+  namespace: quantumlayer
+spec:
+  hosts:
+  - quantum-drops.quantumlayer.svc.cluster.local
+  http:
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: quantum-drops.quantumlayer.svc.cluster.local
+        port:
+          number: 8090
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+
+---
+# AuthorizationPolicy to explicitly allow traffic from temporal namespace
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: quantum-drops-allow-temporal
+  namespace: quantumlayer
+spec:
+  selector:
+    matchLabels:
+      app: quantum-drops
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces: ["temporal"]
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        ports: ["8090"]
+
+---
+# Sidecar configuration to optimize Istio proxy configuration
+apiVersion: networking.istio.io/v1beta1
+kind: Sidecar
+metadata:
+  name: quantum-drops-sidecar
+  namespace: quantumlayer
+spec:
+  workloadSelector:
+    labels:
+      app: quantum-drops
+  egress:
+  - hosts:
+    - "./*"
+    - "istio-system/*"
+    - "temporal/*"
+  ingress:
+  - port:
+      number: 8090
+      protocol: HTTP
+      name: http
+    defaultEndpoint: 127.0.0.1:8090
+    captureMode: NONE
+
+---
+# Telemetry configuration for monitoring
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: quantum-drops-metrics
+  namespace: quantumlayer
+spec:
+  selector:
+    matchLabels:
+      app: quantum-drops
+  metrics:
+  - providers:
+    - name: prometheus
+    overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        source_namespace:
+          value: source.workload.namespace
+        destination_service:
+          value: destination.service.name

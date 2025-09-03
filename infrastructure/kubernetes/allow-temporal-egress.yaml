@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-temporal-egress
+  namespace: temporal
+spec:
+  podSelector: {}  # Apply to all pods in temporal namespace
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: quantumlayer
+    ports:
+    - protocol: TCP
+      port: 8090
+  - to:
+    - podSelector: {}  # Allow traffic within temporal namespace
+  - to:
+    - namespaceSelector: {}  # Allow DNS resolution
+    ports:
+    - protocol: UDP
+      port: 53

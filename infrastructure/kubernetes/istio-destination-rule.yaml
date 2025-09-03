@@ -1,0 +1,24 @@
+# DestinationRule for quantum-drops service with proper field names
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: quantum-drops
+  namespace: quantumlayer
+spec:
+  host: quantum-drops.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 2
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
