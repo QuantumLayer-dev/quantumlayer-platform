@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/workflows/internal/activities"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/workflows/internal/types"
@@ -29,7 +30,7 @@ func CodeGenerationWorkflow(ctx workflow.Context, request types.CodeGenerationRe
 	// Set workflow options
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: ActivityTimeout,
-		RetryPolicy: &workflow.RetryPolicy{
+		RetryPolicy: &temporal.RetryPolicy{
 			MaximumAttempts: 3,
 			InitialInterval: time.Second,
 			BackoffCoefficient: 2.0,

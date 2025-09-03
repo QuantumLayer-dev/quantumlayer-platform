@@ -6,14 +6,14 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 # Copy go mod files
-COPY packages/workflows/go.mod packages/workflows/go.sum ./
-RUN go mod download
+COPY go.mod ./
 
 # Copy source code
-COPY packages/workflows/ ./
+COPY . ./
 
-# Build the worker
-RUN CGO_ENABLED=0 GOOS=linux go build -o worker ./cmd/worker/main.go
+# Download dependencies and build
+RUN go mod tidy && \
+    CGO_ENABLED=0 GOOS=linux go build -o worker ./cmd/worker/main.go
 
 # Final stage
 FROM alpine:latest

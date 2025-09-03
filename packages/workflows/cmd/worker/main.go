@@ -28,8 +28,9 @@ func main() {
 
 	// Create Temporal client
 	c, err := client.Dial(client.Options{
-		HostPort: temporalHost,
-		Logger:   logger,
+		HostPort:  temporalHost,
+		Namespace: "quantumlayer",
+		// Use default Temporal logger
 	})
 	if err != nil {
 		logger.Fatal("Unable to create Temporal client", zap.Error(err))

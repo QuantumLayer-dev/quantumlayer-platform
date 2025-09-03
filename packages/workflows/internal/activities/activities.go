@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/workflows/internal/types"
 )
@@ -293,25 +292,19 @@ func GenerateTestsActivity(ctx context.Context, request TestGenerationRequest) (
 
 // GenerateDocumentationActivity generates documentation
 func GenerateDocumentationActivity(ctx context.Context, request DocumentationRequest) (*DocumentationResult, error) {
-	// Generate documentation prompt
-	docPrompt := fmt.Sprintf("Generate comprehensive documentation for the following %s code:\n\n%s",
-		request.Language, request.Code)
-
 	// For now, return a basic template
+	// TODO: Use LLM to generate documentation
+	_ = request.Code // Will be used when LLM integration is complete
 	documentation := fmt.Sprintf(`# Code Documentation
 
 ## Overview
 This %s code implements %s functionality.
 
 ## Installation
-\`\`\`bash
-# Add installation instructions here
-\`\`\`
+Add installation instructions here
 
 ## Usage
-\`\`\`%s
-// Add usage examples here
-\`\`\`
+Add usage examples here
 
 ## API Reference
 Generated code documentation.
@@ -321,7 +314,7 @@ Please follow the standard contribution guidelines.
 
 ## License
 MIT License
-`, request.Language, request.Type, request.Language)
+`, request.Language, request.Type)
 
 	return &DocumentationResult{
 		Content: documentation,
