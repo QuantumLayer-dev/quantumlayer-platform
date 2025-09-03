@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: quantumlayer
+  labels:
+    app: nats
+spec:
+  type: ClusterIP
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+  namespace: quantumlayer
+  labels:
+    app: nats
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+      - name: nats
+        image: nats:2.10-alpine
+        ports:
+        - containerPort: 4222
+          name: client
+        - containerPort: 8222
+          name: monitor
+        command:
+        - /nats-server
+        args:
+        - --jetstream
+        - --store_dir=/data
+        - --http_port=8222
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8222
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8222
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-nodeport
+  namespace: quantumlayer
+spec:
+  type: NodePort
+  selector:
+    app: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: 4222
+      nodePort: 30422
+    - name: monitor
+      port: 8222
+      targetPort: 8222
+      nodePort: 30822
