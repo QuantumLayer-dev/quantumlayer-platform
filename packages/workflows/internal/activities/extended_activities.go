@@ -156,10 +156,18 @@ func ValidateSemanticActivity(ctx context.Context, request SemanticValidationReq
 		}
 	}
 
+	// Safely extract AST if present
+	var ast string
+	if astValue, ok := parserResult["ast"]; ok && astValue != nil {
+		if astStr, ok := astValue.(string); ok {
+			ast = astStr
+		}
+	}
+
 	return &SemanticValidationResult{
 		Valid:  valid,
 		Issues: issues,
-		AST:    parserResult["ast"].(string),
+		AST:    ast,
 	}, nil
 }
 

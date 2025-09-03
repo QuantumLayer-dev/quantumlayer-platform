@@ -16,11 +16,13 @@ spec:
       labels:
         app: api-gateway
         version: v1
+      annotations:
+        sidecar.istio.io/inject: "false"  # API Gateway is edge service, no sidecar needed
     spec:
       serviceAccountName: api-gateway
       containers:
       - name: api-gateway
-        image: ghcr.io/quantumlayer-dev/api-gateway:latest
+        image: ghcr.io/quantumlayer-dev/api-gateway:v2.0.2
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -34,16 +36,6 @@ spec:
           value: "8080"
         - name: METRICS_PORT
           value: "9090"
-        
-        # Service endpoints
-        - name: LLM_ROUTER_URL
-          value: "http://llm-router:8080"
-        - name: AGENT_ORCHESTRATOR_URL
-          value: "http://agent-orchestrator:8080"
-        - name: META_PROMPT_ENGINE_URL
-          value: "http://meta-prompt-engine:8080"
-        - name: PARSER_SERVICE_URL
-          value: "http://parser:8080"
         
         # Database configuration
         - name: DATABASE_URL
@@ -80,6 +72,18 @@ spec:
           value: "http://jaeger-collector.istio-system:14268/api/traces"
         - name: OTEL_EXPORTER_JAEGER_ENDPOINT
           value: "http://jaeger-collector.istio-system:14268/api/traces"
+        
+        # Backend service URLs for proxying
+        - name: WORKFLOW_API_URL
+          value: "http://workflow-api.temporal.svc.cluster.local:8080"
+        - name: LLM_ROUTER_URL
+          value: "http://llm-router.quantumlayer.svc.cluster.local:8080"
+        - name: AGENT_ORCHESTRATOR_URL
+          value: "http://agent-orchestrator.quantumlayer.svc.cluster.local:8083"
+        - name: META_PROMPT_ENGINE_URL
+          value: "http://meta-prompt-engine.quantumlayer.svc.cluster.local:8085"
+        - name: PARSER_URL
+          value: "http://parser.quantumlayer.svc.cluster.local:8086"
         
         resources:
           requests:

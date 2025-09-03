@@ -16,6 +16,8 @@ spec:
       labels:
         app: workflow-api
         component: api
+      annotations:
+        sidecar.istio.io/inject: "false"  # Workflow API called directly by API Gateway
     spec:
       containers:
       - name: api

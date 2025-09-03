@@ -9,6 +9,7 @@ import (
     "syscall"
     "time"
 
+    "github.com/QuantumLayer-dev/quantumlayer-platform/packages/api-gateway/internal/proxy"
     "github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/config"
     "github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/telemetry"
     "github.com/gin-gonic/gin"
@@ -39,6 +40,9 @@ func main() {
     defer cleanup()
     _ = tracer
 
+    // Initialize proxy handler
+    proxyHandler := proxy.NewProxyHandler()
+
     // Setup Gin router
     router := gin.New()
     router.Use(gin.Recovery())
@@ -57,53 +61,63 @@ func main() {
         c.JSON(http.StatusOK, gin.H{"status": "ready"})
     })
 
-    // GraphQL endpoint (placeholder for now)
+    // GraphQL endpoint - forward to appropriate service
     router.POST("/graphql", func(c *gin.Context) {
-        c.JSON(http.StatusOK, gin.H{
-            "data": gin.H{
-                "systemStatus": gin.H{
-                    "version": "2.0.0",
-                    "uptime": 86400,
-                    "activeAgents": 8,
-                    "queuedTasks": 3,
-                    "completedToday": 127,
-                },
-            },
-        })
+        // For now, return service status
+        proxyHandler.GetServiceStatus(c)
     })
 
     // API v1 endpoints for REST compatibility
     v1 := router.Group("/api/v1")
     {
-        v1.GET("/status", func(c *gin.Context) {
-            c.JSON(http.StatusOK, gin.H{
-                "platform": "QuantumLayer",
-                "version": "2.0.0",
-                "services": gin.H{
-                    "llm-router": "healthy",
-                    "agent-orchestrator": "healthy",
-                    "meta-prompt-engine": "healthy",
-                    "temporal": "healthy",
-                },
-            })
-        })
+        // Service status endpoint
+        v1.GET("/status", proxyHandler.GetServiceStatus)
 
-        v1.POST("/generate", func(c *gin.Context) {
-            var req struct {
-                Prompt   string `json:"prompt"`
-                Language string `json:"language"`
-            }
-            if err := c.ShouldBindJSON(&req); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-                return
-            }
-
-            c.JSON(http.StatusOK, gin.H{
-                "id": "gen-" + fmt.Sprintf("%d", time.Now().Unix()),
-                "status": "processing",
-                "message": "Code generation started",
-            })
-        })
+        // Workflow generation endpoints
+        v1.POST("/generate", proxyHandler.ProxyToWorkflow)
+        
+        // Workflow endpoints - proxy to workflow-api
+        workflows := v1.Group("/workflows")
+        {
+            // Specific routes must come before wildcard routes
+            workflows.POST("/generate", proxyHandler.ProxyToWorkflow)
+            workflows.POST("/generate-extended", proxyHandler.ProxyToWorkflowExtended)
+            // Remove wildcard routes as they conflict with specific routes
+            // For additional workflow endpoints, add them explicitly
+        }
+        
+        // LLM Router endpoints
+        llm := v1.Group("/llm")
+        {
+            llm.POST("/generate", proxyHandler.ProxyToLLMRouter)
+            llm.POST("/stream", proxyHandler.ProxyToLLMRouter)
+            // Remove wildcard route to avoid conflicts
+        }
+        
+        // Agent Orchestrator endpoints
+        agents := v1.Group("/agents")
+        {
+            agents.POST("/create", proxyHandler.ProxyToAgentOrchestrator)
+            agents.GET("/list", proxyHandler.ProxyToAgentOrchestrator)
+            agents.GET("/status", proxyHandler.ProxyToAgentOrchestrator)
+            agents.POST("/execute", proxyHandler.ProxyToAgentOrchestrator)
+        }
+        
+        // Meta Prompt Engine endpoints
+        prompts := v1.Group("/prompts")
+        {
+            prompts.POST("/generate", proxyHandler.ProxyToMetaPromptEngine)
+            prompts.POST("/optimize", proxyHandler.ProxyToMetaPromptEngine)
+            prompts.GET("/templates", proxyHandler.ProxyToMetaPromptEngine)
+        }
+        
+        // Parser endpoints
+        parser := v1.Group("/parser")
+        {
+            parser.POST("/parse", proxyHandler.ProxyToParser)
+            parser.POST("/validate", proxyHandler.ProxyToParser)
+            parser.POST("/transform", proxyHandler.ProxyToParser)
+        }
     }
 
     // Create HTTP server

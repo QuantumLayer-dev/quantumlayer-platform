@@ -33,7 +33,8 @@ spec:
     metadata:
       labels:
         app: nats
-        sidecar.istio.io/inject: "true"
+      annotations:
+        sidecar.istio.io/inject: "false"
     spec:
       containers:
       - name: nats
