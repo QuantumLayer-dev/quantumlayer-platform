@@ -18,14 +18,14 @@ import (
 	"github.com/smacker/go-tree-sitter/html"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
-	"github.com/smacker/go-tree-sitter/json"
+	// "github.com/smacker/go-tree-sitter/json" // Not available in latest version
 	"github.com/smacker/go-tree-sitter/php"
 	"github.com/smacker/go-tree-sitter/protobuf"
 	"github.com/smacker/go-tree-sitter/python"
 	"github.com/smacker/go-tree-sitter/ruby"
 	"github.com/smacker/go-tree-sitter/rust"
 	"github.com/smacker/go-tree-sitter/scala"
-	"github.com/smacker/go-tree-sitter/sql"
+	// "github.com/smacker/go-tree-sitter/sql" // Not available in latest version
 	"github.com/smacker/go-tree-sitter/toml"
 	"github.com/smacker/go-tree-sitter/typescript/tsx"
 	"github.com/smacker/go-tree-sitter/typescript/typescript"
@@ -95,10 +95,10 @@ func (p *Parser) initializeParsers() {
 		LangRuby:       ruby.GetLanguage(),
 		LangPHP:        php.GetLanguage(),
 		LangScala:      scala.GetLanguage(),
-		LangSQL:        sql.GetLanguage(),
+		// LangSQL:        sql.GetLanguage(), // Commented out - package not available
 		LangBash:       bash.GetLanguage(),
 		LangYAML:       yaml.GetLanguage(),
-		LangJSON:       json.GetLanguage(),
+		// LangJSON:       json.GetLanguage(), // Commented out - package not available
 		LangTOML:       toml.GetLanguage(),
 		LangHTML:       html.GetLanguage(),
 		LangCSS:        css.GetLanguage(),
