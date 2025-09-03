@@ -67,14 +67,21 @@ type DocumentationResult struct {
 
 // EnhancePromptActivity enhances the prompt using Meta Prompt Engine
 func EnhancePromptActivity(ctx context.Context, request types.PromptEnhancementRequest) (*types.PromptEnhancementResult, error) {
-	// Call Meta Prompt Engine service
+	// Try to call Meta Prompt Engine service
 	payload, _ := json.Marshal(request)
 	resp, err := http.Post(
 		fmt.Sprintf("%s/enhance", MetaPromptURL),
 		"application/json",
 		bytes.NewBuffer(payload),
 	)
-	if err != nil {
+	
+	// If service is unavailable or returns non-200, use fallback
+	if err != nil || (resp != nil && resp.StatusCode != http.StatusOK) {
+		// Log that we're using fallback (in production, use proper logger)
+		fmt.Printf("Meta-prompt engine unavailable, using fallback enhancement\n")
+		if resp != nil {
+			resp.Body.Close()
+		}
 		// Fallback to basic enhancement
 		return &types.PromptEnhancementResult{
 			EnhancedPrompt: improvePrompt(request.OriginalPrompt, request.Type),
@@ -84,9 +91,16 @@ func EnhancePromptActivity(ctx context.Context, request types.PromptEnhancementR
 	}
 	defer resp.Body.Close()
 
+	// Try to decode the response
 	var result types.PromptEnhancementResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode enhancement response: %w", err)
+		// If decoding fails, use fallback instead of returning error
+		fmt.Printf("Failed to decode enhancement response: %v, using fallback\n", err)
+		return &types.PromptEnhancementResult{
+			EnhancedPrompt: improvePrompt(request.OriginalPrompt, request.Type),
+			SystemPrompt:   getSystemPrompt(request.Type),
+			Tokens:         len(strings.Fields(request.OriginalPrompt)) * 2,
+		}, nil
 	}
 
 	return &result, nil
@@ -339,7 +353,30 @@ func improvePrompt(original, promptType string) string {
 }
 
 func getSystemPrompt(promptType string) string {
-	return "You are an expert software engineer. Generate clean, production-ready code with proper error handling, comments, and best practices. Only return code without explanations."
+	basePrompt := `You are an expert software engineer. Your task is to generate COMPLETE, RUNNABLE code based on the requirements.
+
+IMPORTANT RULES:
+1. Generate the FULL implementation, not just imports or setup commands
+2. Include all necessary functions, classes, and logic
+3. Add proper error handling and input validation
+4. Include helpful comments explaining complex logic
+5. Follow language-specific best practices and conventions
+6. Make the code production-ready and maintainable
+7. DO NOT include installation commands like "pip install" in the code file
+8. DO NOT explain the code - just provide the implementation
+
+Output only the complete code implementation.`
+	
+	switch promptType {
+	case "api":
+		return basePrompt + "\n\nFor APIs: Include routes, handlers, middleware, error handling, and basic validation."
+	case "frontend":
+		return basePrompt + "\n\nFor Frontend: Include HTML structure, CSS styles, JavaScript logic, and user interactions."
+	case "function":
+		return basePrompt + "\n\nFor Functions: Include the complete function with parameters, logic, error handling, and return values."
+	default:
+		return basePrompt
+	}
 }
 
 func getExtension(language string) string {
