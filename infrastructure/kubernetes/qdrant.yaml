@@ -5,6 +5,7 @@ metadata:
   name: qdrant-storage
   namespace: quantumlayer
 spec:
+  storageClassName: longhorn
   accessModes:
     - ReadWriteOnce
   resources:

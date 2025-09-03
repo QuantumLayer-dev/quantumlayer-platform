@@ -1,0 +1,122 @@
+# NATS Configuration for QuantumLayer Platform
+# JetStream enabled for agent communication and event streaming
+
+nats:
+  # JetStream configuration for persistent messaging
+  jetstream:
+    enabled: true
+    
+    # Memory storage for fast access
+    memStorage:
+      enabled: true
+      size: 1Gi
+    
+    # File storage for persistence
+    fileStorage:
+      enabled: true
+      size: 10Gi
+      storageDirectory: /data
+      storageClassName: standard  # Change based on your storage class
+    
+    # Domain for multi-tenancy (if needed)
+    domain: quantumlayer
+    
+  # Clustering for high availability
+  cluster:
+    enabled: true
+    replicas: 3
+    
+  # NATS Box for debugging and management
+  natsbox:
+    enabled: true
+    
+  # Service configuration
+  service:
+    ports:
+      client:
+        port: 4222
+      cluster:
+        port: 6222
+      monitor:
+        port: 8222
+      leafnodes:
+        port: 7422
+    
+    # NodePort for external access (development)
+    type: ClusterIP  # Change to NodePort if external access needed
+    
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+      
+  # Container settings
+  container:
+    image:
+      repository: nats
+      tag: 2.10-alpine
+      pullPolicy: IfNotPresent
+    
+  # Monitoring
+  exporter:
+    enabled: true
+    image:
+      repository: natsio/prometheus-nats-exporter
+      tag: latest
+    
+  # Logging
+  logging:
+    debug: false
+    trace: false
+    
+  # Security
+  auth:
+    enabled: false  # Enable in production with proper tokens
+    # token: "your-secure-token-here"
+    
+  # Limits per connection
+  limits:
+    maxConnections: 1000
+    maxPayload: 1MB
+    maxPending: 10MB
+    maxSubscriptions: 1000
+    
+# Pod settings
+podTemplate:
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: nats
+          
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - nats
+            topologyKey: kubernetes.io/hostname
+            
+# Persistence configuration
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: standard  # Change based on your cluster
+  
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus

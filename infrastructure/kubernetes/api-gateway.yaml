@@ -1,0 +1,235 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+  labels:
+    app: api-gateway
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        version: v1
+    spec:
+      serviceAccountName: api-gateway
+      containers:
+      - name: api-gateway
+        image: ghcr.io/quantumlayer-dev/api-gateway:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: PORT
+          value: "8080"
+        - name: METRICS_PORT
+          value: "9090"
+        
+        # Service endpoints
+        - name: LLM_ROUTER_URL
+          value: "http://llm-router:8080"
+        - name: AGENT_ORCHESTRATOR_URL
+          value: "http://agent-orchestrator:8080"
+        - name: META_PROMPT_ENGINE_URL
+          value: "http://meta-prompt-engine:8080"
+        - name: PARSER_SERVICE_URL
+          value: "http://parser:8080"
+        
+        # Database configuration
+        - name: DATABASE_URL
+          value: "postgres://qlayer:QuantumLayer2024!@postgres-cluster-rw:5432/quantumlayer?sslmode=require"
+        
+        # Redis configuration
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        
+        # NATS configuration
+        - name: NATS_URL
+          value: "nats://nats:4222"
+        
+        # Temporal configuration
+        - name: TEMPORAL_ADDRESS
+          value: "temporal-frontend:7233"
+        
+        # Clerk authentication
+        - name: CLERK_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: clerk-secrets
+              key: CLERK_SECRET_KEY
+              optional: true
+        - name: CLERK_JWT_VERIFICATION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: clerk-secrets
+              key: CLERK_JWT_VERIFICATION_KEY
+              optional: true
+        
+        # Tracing
+        - name: JAEGER_ENDPOINT
+          value: "http://jaeger-collector.istio-system:14268/api/traces"
+        - name: OTEL_EXPORTER_JAEGER_ENDPOINT
+          value: "http://jaeger-collector.istio-system:14268/api/traces"
+        
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+            
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+  labels:
+    app: api-gateway
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: api-gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-nodeport
+  namespace: quantumlayer
+  labels:
+    app: api-gateway
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30880
+    protocol: TCP
+    name: http
+  selector:
+    app: api-gateway
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+# Istio VirtualService for API Gateway
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+spec:
+  hosts:
+  - api-gateway
+  - api.quantumlayer.ai
+  gateways:
+  - istio-system/main-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /graphql
+    - uri:
+        prefix: /api
+    route:
+    - destination:
+        host: api-gateway
+        port:
+          number: 8080
+    corsPolicy:
+      allowOrigins:
+      - exact: https://quantumlayer.ai
+      - exact: http://localhost:3000
+      - regex: "https://.*\\.clerk\\.accounts\\.dev"
+      allowMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+      allowHeaders:
+      - authorization
+      - content-type
+      - x-clerk-session
+      allowCredentials: true
+      maxAge: "24h"
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway
+  namespace: quantumlayer
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api-gateway

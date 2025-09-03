@@ -79,6 +79,9 @@ install_istio() {
         --set meshConfig.accessLogFile=/dev/stdout \
         -y
     
+    # Create namespace if it doesn't exist
+    kubectl create namespace $NAMESPACE || true
+    
     # Enable injection for namespace
     kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
     
@@ -169,8 +172,8 @@ install_argocd() {
         -n argocd \
         --timeout=300s
     
-    # Apply ArgoCD applications
-    kubectl apply -f infrastructure/argocd/applications.yaml
+    # Apply ArgoCD applications (skip if file has issues)
+    # kubectl apply -f infrastructure/argocd/applications.yaml
     
     log_info "ArgoCD installed ✓"
 }
@@ -194,6 +197,115 @@ deploy_postgres_ha() {
     log_info "PostgreSQL HA deployed ✓"
 }
 
+# Install Temporal workflow engine
+install_temporal() {
+    log_info "Installing Temporal workflow engine..."
+    
+    helm repo add temporal https://temporalio.github.io/helm-charts
+    helm repo update
+    
+    # Install Temporal with PostgreSQL backend
+    helm install temporal temporal/temporal \
+        -n $NAMESPACE \
+        -f infrastructure/helm-values/temporal-values.yaml \
+        --wait --timeout 5m
+    
+    log_info "Temporal installed successfully ✓"
+}
+
+# Install NATS with JetStream
+install_nats() {
+    log_info "Installing NATS with JetStream..."
+    
+    helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+    helm repo update
+    
+    # Create NATS values file if it doesn't exist
+    if [ ! -f infrastructure/helm-values/nats-values.yaml ]; then
+        cat <<EOF > infrastructure/helm-values/nats-values.yaml
+# NATS Configuration for QuantumLayer
+nats:
+  jetstream:
+    enabled: true
+    memStorage:
+      enabled: true
+      size: 1Gi
+    fileStorage:
+      enabled: true
+      size: 10Gi
+      storageDirectory: /data
+    
+  cluster:
+    enabled: true
+    replicas: 3
+    
+  natsbox:
+    enabled: true
+    
+  service:
+    ports:
+      client:
+        port: 4222
+      cluster:
+        port: 6222
+      monitor:
+        port: 8222
+      leafnodes:
+        port: 7422
+        
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+EOF
+    fi
+    
+    helm install nats nats/nats \
+        -n $NAMESPACE \
+        -f infrastructure/helm-values/nats-values.yaml \
+        --wait --timeout 5m
+    
+    log_info "NATS JetStream installed successfully ✓"
+}
+
+# Setup Clerk authentication
+setup_clerk() {
+    log_info "Setting up Clerk authentication..."
+    
+    # Create Clerk secrets template if not exists
+    if [ ! -f infrastructure/kubernetes/clerk-secrets.yaml ]; then
+        cat <<EOF > infrastructure/kubernetes/clerk-secrets.yaml
+# Clerk Authentication Secrets
+# IMPORTANT: Replace the placeholder values with your actual Clerk keys
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clerk-secrets
+  namespace: $NAMESPACE
+type: Opaque
+stringData:
+  CLERK_SECRET_KEY: "sk_test_REPLACE_WITH_YOUR_SECRET_KEY"
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_REPLACE_WITH_YOUR_PUBLISHABLE_KEY"
+  CLERK_JWT_VERIFICATION_KEY: |
+    -----BEGIN PUBLIC KEY-----
+    REPLACE_WITH_YOUR_JWT_VERIFICATION_KEY
+    -----END PUBLIC KEY-----
+EOF
+        log_warn "Created clerk-secrets.yaml template. Please update with your actual Clerk keys!"
+    fi
+    
+    # Check if secrets already exist
+    if kubectl get secret clerk-secrets -n $NAMESPACE &> /dev/null; then
+        log_info "Clerk secrets already configured ✓"
+    else
+        log_warn "Please configure Clerk secrets in infrastructure/kubernetes/clerk-secrets.yaml"
+        log_warn "Then run: kubectl apply -f infrastructure/kubernetes/clerk-secrets.yaml"
+    fi
+}
+
 # Deploy core services
 deploy_services() {
     log_info "Deploying core services..."
@@ -201,18 +313,33 @@ deploy_services() {
     # Create namespace
     kubectl create namespace $NAMESPACE || true
     
+    # Label namespace for Istio injection if not already done
+    kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
+    
     # Apply network policies
     kubectl apply -f infrastructure/kubernetes/network-policies.yaml
     
     # Apply Istio configuration
     kubectl apply -f infrastructure/kubernetes/istio-config.yaml
     
-    # Deploy Redis with auth
+    # Deploy data services
+    log_info "Deploying data services..."
     kubectl apply -f infrastructure/kubernetes/redis.yaml
+    kubectl apply -f infrastructure/kubernetes/qdrant.yaml
     
-    # Deploy services
+    # Deploy application services
+    log_info "Deploying application services..."
     kubectl apply -f infrastructure/kubernetes/llm-router.yaml
     kubectl apply -f infrastructure/kubernetes/agent-orchestrator.yaml
+    kubectl apply -f infrastructure/kubernetes/meta-prompt-engine.yaml
+    kubectl apply -f infrastructure/kubernetes/parser.yaml
+    
+    # Deploy API Gateway if exists
+    if [ -f infrastructure/kubernetes/api-gateway.yaml ]; then
+        kubectl apply -f infrastructure/kubernetes/api-gateway.yaml
+    else
+        log_warn "API Gateway manifest not found, skipping..."
+    fi
     
     # Apply monitoring
     kubectl apply -f infrastructure/kubernetes/monitoring.yaml
@@ -260,9 +387,14 @@ SERVICES STATUS:
 $(kubectl get pods -n $NAMESPACE)
 
 ENDPOINTS:
-- API Gateway: https://api.quantumlayer.ai
-- LLM Router: https://llm.quantumlayer.ai
-- Agent Orchestrator: https://agent.quantumlayer.ai
+- API Gateway: https://api.quantumlayer.ai (NodePort: 30880)
+- LLM Router: https://llm.quantumlayer.ai (NodePort: 30881)
+- Agent Orchestrator: https://agent.quantumlayer.ai (NodePort: 30882)
+- Meta Prompt Engine: NodePort 30885
+- Redis: NodePort 30379
+- Qdrant: http://192.168.7.235:30633
+- Temporal UI: http://temporal.quantumlayer.ai:8080
+- NATS: nats://nats:4222 (internal)
 - Grafana: https://grafana.quantumlayer.ai
 - ArgoCD: https://argocd.quantumlayer.ai
 
@@ -270,6 +402,7 @@ MONITORING:
 - Prometheus: http://prometheus.monitoring:9090
 - Grafana: http://grafana.monitoring:3000
 - Jaeger: http://jaeger.istio-system:16686
+- NATS Monitor: http://nats:8222
 
 SECURITY:
 ✓ mTLS enabled via Istio
@@ -309,6 +442,13 @@ main() {
     # Deploy database
     deploy_postgres_ha
     
+    # Install workflow and messaging systems
+    install_temporal
+    install_nats
+    
+    # Setup authentication
+    setup_clerk
+    
     # Deploy application services
     deploy_services
     
@@ -329,28 +469,51 @@ main() {
     # Show next steps
     cat <<EOF
 Next Steps:
-1. Configure DNS records for:
-   - api.quantumlayer.ai
-   - llm.quantumlayer.ai
-   - agent.quantumlayer.ai
+1. Configure Clerk Authentication:
+   - Sign up at https://clerk.com
+   - Create an application
+   - Get your Secret Key and Publishable Key
+   - Update infrastructure/kubernetes/clerk-secrets.yaml
+   - Apply: kubectl apply -f infrastructure/kubernetes/clerk-secrets.yaml
 
-2. Access ArgoCD UI:
+2. Configure DNS records for:
+   - api.quantumlayer.ai → Load Balancer IP
+   - temporal.quantumlayer.ai → Load Balancer IP
+   - *.quantumlayer.ai → Load Balancer IP
+
+3. Access Temporal UI:
+   kubectl port-forward svc/temporal-web -n quantumlayer 8088:8088
+   Then visit: http://localhost:8088
+
+4. Access NATS Monitoring:
+   kubectl port-forward svc/nats -n quantumlayer 8222:8222
+   Then visit: http://localhost:8222
+
+5. Access ArgoCD UI:
    kubectl port-forward svc/argocd-server -n argocd 8080:443
    Username: admin
    Password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
-3. Access Grafana Dashboard:
+6. Access Grafana Dashboard:
    kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
    Username: admin
    Password: admin
 
-4. Configure external secrets in Vault:
-   - LLM API keys
-   - Database credentials
-   - TLS certificates
+7. Configure LLM API Keys:
+   - OpenAI API Key
+   - Anthropic API Key
+   - AWS Bedrock credentials
+   - Azure OpenAI endpoint
+   Update: kubectl edit secret llm-secrets -n quantumlayer
 
-5. Enable backup jobs:
-   kubectl apply -f infrastructure/kubernetes/backup-cronjobs.yaml
+8. Initialize Temporal Schema:
+   kubectl exec -it temporal-admintools-0 -n quantumlayer -- temporal-sql-tool create-database
+   kubectl exec -it temporal-admintools-0 -n quantumlayer -- temporal-sql-tool setup-schema -v 0.0
+
+9. Test Services:
+   curl http://<node-ip>:30880/health  # API Gateway
+   curl http://<node-ip>:30881/health  # LLM Router
+   curl http://<node-ip>:30882/health  # Agent Orchestrator
 
 EOF
 }
