@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuantumLayer Platform - Enterprise AI Software Factory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <div x-data="quantumLayerApp()" class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-gray-800 border-b border-gray-700">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <i class="fas fa-atom text-3xl text-blue-500"></i>
+                        <div>
+                            <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+                                QuantumLayer Platform
+                            </h1>
+                            <p class="text-sm text-gray-400">Enterprise AI Software Factory - v2.0</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4 text-sm">
+                        <span class="px-2 py-1 bg-green-900 text-green-300 rounded">
+                            <i class="fas fa-circle text-green-400 animate-pulse"></i> System Online
+                        </span>
+                        <span class="text-gray-400">Progress: 45%</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="container mx-auto px-4 py-8">
+            <!-- Five Paths -->
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <div class="text-center">
+                        <i class="fas fa-code text-3xl text-blue-500 mb-2"></i>
+                        <h3 class="font-bold">QLayer</h3>
+                        <p class="text-xs text-gray-400">Code Generation</p>
+                        <span class="text-xs px-2 py-1 bg-green-900 text-green-300 rounded mt-2 inline-block">Active</span>
+                    </div>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <div class="text-center">
+                        <i class="fas fa-vial text-3xl text-green-500 mb-2"></i>
+                        <h3 class="font-bold">QTest</h3>
+                        <p class="text-xs text-gray-400">Test Generation</p>
+                        <span class="text-xs px-2 py-1 bg-yellow-900 text-yellow-300 rounded mt-2 inline-block">Planned</span>
+                    </div>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <div class="text-center">
+                        <i class="fas fa-server text-3xl text-purple-500 mb-2"></i>
+                        <h3 class="font-bold">QInfra</h3>
+                        <p class="text-xs text-gray-400">Infrastructure</p>
+                        <span class="text-xs px-2 py-1 bg-yellow-900 text-yellow-300 rounded mt-2 inline-block">Planned</span>
+                    </div>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                    <div class="text-center">
+                        <i class="fas fa-chart-line text-3xl text-orange-500 mb-2"></i>
+                        <h3 class="font-bold">QSRE</h3>
+                        <p class="text-xs text-gray-400">Site Reliability</p>
+                        <span class="text-xs px-2 py-1 bg-yellow-900 text-yellow-300 rounded mt-2 inline-block">Planned</span>
+                    </div>
+                </div>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 ring-2 ring-red-500">
+                    <div class="text-center">
+                        <i class="fas fa-shield-alt text-3xl text-red-500 mb-2"></i>
+                        <h3 class="font-bold">QSecure</h3>
+                        <p class="text-xs text-gray-400">Security</p>
+                        <span class="text-xs px-2 py-1 bg-green-900 text-green-300 rounded mt-2 inline-block">NEW!</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="mb-4 border-b border-gray-700">
+                <nav class="flex space-x-8">
+                    <button @click="activeTab = 'test'" 
+                            :class="activeTab === 'test' ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-400'"
+                            class="py-2 px-1 border-b-2 font-medium text-sm">
+                        <i class="fas fa-play-circle mr-2"></i>Test APIs
+                    </button>
+                    <button @click="activeTab = 'architecture'" 
+                            :class="activeTab === 'architecture' ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-400'"
+                            class="py-2 px-1 border-b-2 font-medium text-sm">
+                        <i class="fas fa-project-diagram mr-2"></i>Architecture
+                    </button>
+                    <button @click="activeTab = 'agents'" 
+                            :class="activeTab === 'agents' ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-400'"
+                            class="py-2 px-1 border-b-2 font-medium text-sm">
+                        <i class="fas fa-robot mr-2"></i>AI Agents
+                    </button>
+                    <button @click="activeTab = 'metrics'" 
+                            :class="activeTab === 'metrics' ? 'border-blue-500 text-blue-500' : 'border-transparent text-gray-400'"
+                            class="py-2 px-1 border-b-2 font-medium text-sm">
+                        <i class="fas fa-chart-bar mr-2"></i>Metrics
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Tab Content -->
+            <div x-show="activeTab === 'test'" class="space-y-6">
+                <!-- Code Generation Test -->
+                <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                    <h3 class="text-lg font-bold mb-4">
+                        <i class="fas fa-code text-blue-500 mr-2"></i>Code Generation
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Prompt</label>
+                            <textarea x-model="codeGenRequest.prompt" 
+                                    class="w-full p-3 bg-gray-700 rounded border border-gray-600 focus:border-blue-500"
+                                    rows="3"
+                                    placeholder="Create a REST API with user authentication..."></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Language</label>
+                                <select x-model="codeGenRequest.language" 
+                                        class="w-full p-2 bg-gray-700 rounded border border-gray-600">
+                                    <option value="python">Python</option>
+                                    <option value="javascript">JavaScript</option>
+                                    <option value="go">Go</option>
+                                    <option value="java">Java</option>
+                                    <option value="rust">Rust</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Type</label>
+                                <select x-model="codeGenRequest.type" 
+                                        class="w-full p-2 bg-gray-700 rounded border border-gray-600">
+                                    <option value="api">API</option>
+                                    <option value="function">Function</option>
+                                    <option value="frontend">Frontend</option>
+                                    <option value="fullstack">Full Stack</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button @click="generateCode()" 
+                                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium">
+                            <i class="fas fa-magic mr-2"></i>Generate Code
+                        </button>
+                    </div>
+                    <div x-show="codeGenResponse" class="mt-4 p-4 bg-gray-900 rounded">
+                        <pre x-text="JSON.stringify(codeGenResponse, null, 2)" class="text-xs"></pre>
+                    </div>
+                </div>
+
+                <!-- LLM Test -->
+                <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                    <h3 class="text-lg font-bold mb-4">
+                        <i class="fas fa-brain text-purple-500 mr-2"></i>Multi-LLM Router
+                    </h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Prompt</label>
+                            <input x-model="llmRequest.prompt" 
+                                   type="text" 
+                                   class="w-full p-2 bg-gray-700 rounded border border-gray-600"
+                                   placeholder="Ask anything...">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Provider</label>
+                            <select x-model="llmRequest.provider" 
+                                    class="w-full p-2 bg-gray-700 rounded border border-gray-600">
+                                <option value="azure">Azure OpenAI</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="bedrock">AWS Bedrock</option>
+                            </select>
+                        </div>
+                        <button @click="testLLM()" 
+                                class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded font-medium">
+                            <i class="fas fa-comment mr-2"></i>Send Request
+                        </button>
+                    </div>
+                    <div x-show="llmResponse" class="mt-4 p-4 bg-gray-900 rounded">
+                        <p x-text="llmResponse.content" class="text-sm"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Architecture Tab -->
+            <div x-show="activeTab === 'architecture'" class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-bold mb-4">AI-Native Architecture</h3>
+                <div class="grid grid-cols-2 gap-6">
+                    <div>
+                        <h4 class="font-bold text-red-400 mb-2">❌ Legacy Pattern (Removed)</h4>
+                        <pre class="bg-gray-900 p-4 rounded text-xs">
+switch(language) {
+  case "python":
+    return "py"
+  case "javascript":
+    return "js"
+  default:
+    return "txt"
+}</pre>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-green-400 mb-2">✅ AI-Native Pattern (New)</h4>
+                        <pre class="bg-gray-900 p-4 rounded text-xs">
+decision = aiEngine.Decide(
+  context: "language_selection",
+  input: requirements,
+  threshold: 0.7
+)
+// Uses embeddings & semantic similarity</pre>
+                    </div>
+                </div>
+                
+                <div class="mt-6">
+                    <h4 class="font-bold mb-2">Key Components</h4>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-gray-900 p-4 rounded">
+                            <i class="fas fa-brain text-blue-500 text-2xl mb-2"></i>
+                            <h5 class="font-bold">AI Decision Engine</h5>
+                            <p class="text-xs text-gray-400">Semantic routing with embeddings</p>
+                        </div>
+                        <div class="bg-gray-900 p-4 rounded">
+                            <i class="fas fa-shield-alt text-red-500 text-2xl mb-2"></i>
+                            <h5 class="font-bold">QSecure Engine</h5>
+                            <p class="text-xs text-gray-400">Comprehensive security analysis</p>
+                        </div>
+                        <div class="bg-gray-900 p-4 rounded">
+                            <i class="fas fa-robot text-green-500 text-2xl mb-2"></i>
+                            <h5 class="font-bold">AI Agent Factory</h5>
+                            <p class="text-xs text-gray-400">Dynamic agent creation</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agents Tab -->
+            <div x-show="activeTab === 'agents'" class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-bold mb-4">AI Agent Specialists</h3>
+                <div class="grid grid-cols-3 gap-4">
+                    <template x-for="agent in agents">
+                        <div class="bg-gray-900 p-4 rounded border border-gray-700">
+                            <div class="flex items-center justify-between mb-2">
+                                <i :class="agent.icon + ' text-2xl ' + agent.color"></i>
+                                <span x-show="agent.new" class="text-xs px-2 py-1 bg-red-900 text-red-300 rounded">NEW</span>
+                            </div>
+                            <h4 class="font-bold text-sm" x-text="agent.name"></h4>
+                            <p class="text-xs text-gray-400 mt-1" x-text="agent.description"></p>
+                            <div class="mt-2">
+                                <span class="text-xs text-gray-500">Capabilities:</span>
+                                <div class="flex flex-wrap gap-1 mt-1">
+                                    <template x-for="cap in agent.capabilities">
+                                        <span class="text-xs px-1 py-0.5 bg-gray-800 rounded" x-text="cap"></span>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Metrics Tab -->
+            <div x-show="activeTab === 'metrics'" class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-bold mb-4">Platform Metrics</h3>
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="bg-gray-900 p-4 rounded">
+                        <div class="text-2xl font-bold text-blue-400">45%</div>
+                        <div class="text-xs text-gray-400">Overall Progress</div>
+                    </div>
+                    <div class="bg-gray-900 p-4 rounded">
+                        <div class="text-2xl font-bold text-green-400">26</div>
+                        <div class="text-xs text-gray-400">Switch Statements Replaced</div>
+                    </div>
+                    <div class="bg-gray-900 p-4 rounded">
+                        <div class="text-2xl font-bold text-purple-400">5</div>
+                        <div class="text-xs text-gray-400">Security Agents Added</div>
+                    </div>
+                    <div class="bg-gray-900 p-4 rounded">
+                        <div class="text-2xl font-bold text-orange-400">5</div>
+                        <div class="text-xs text-gray-400">Product Paths</div>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <h4 class="font-bold mb-2">Service Status</h4>
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
+                            <span class="text-sm">Temporal Workflows</span>
+                            <span class="text-xs px-2 py-1 bg-green-900 text-green-300 rounded">Running</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
+                            <span class="text-sm">LLM Router</span>
+                            <span class="text-xs px-2 py-1 bg-green-900 text-green-300 rounded">Running</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
+                            <span class="text-sm">Agent Orchestrator</span>
+                            <span class="text-xs px-2 py-1 bg-green-900 text-green-300 rounded">Running</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
+                            <span class="text-sm">QSecure Engine</span>
+                            <span class="text-xs px-2 py-1 bg-yellow-900 text-yellow-300 rounded">Ready to Deploy</span>
+                        </div>
+                        <div class="flex items-center justify-between p-2 bg-gray-900 rounded">
+                            <span class="text-sm">Meta-Prompt Engine</span>
+                            <span class="text-xs px-2 py-1 bg-yellow-900 text-yellow-300 rounded">Ready to Deploy</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function quantumLayerApp() {
+            return {
+                activeTab: 'test',
+                baseUrl: 'http://192.168.1.177',
+                codeGenRequest: {
+                    prompt: 'Create a REST API with user authentication using JWT tokens',
+                    language: 'python',
+                    type: 'api'
+                },
+                codeGenResponse: null,
+                llmRequest: {
+                    prompt: 'Explain the benefits of AI-native architecture',
+                    provider: 'azure'
+                },
+                llmResponse: null,
+                agents: [
+                    {
+                        name: 'Project Manager',
+                        icon: 'fas fa-tasks',
+                        color: 'text-blue-500',
+                        description: 'Manages project execution',
+                        capabilities: ['Planning', 'Coordination']
+                    },
+                    {
+                        name: 'Architect',
+                        icon: 'fas fa-drafting-compass',
+                        color: 'text-purple-500',
+                        description: 'Designs system architecture',
+                        capabilities: ['Design', 'Patterns']
+                    },
+                    {
+                        name: 'Backend Developer',
+                        icon: 'fas fa-server',
+                        color: 'text-green-500',
+                        description: 'Develops backend services',
+                        capabilities: ['API', 'Database']
+                    },
+                    {
+                        name: 'Security Architect',
+                        icon: 'fas fa-shield-alt',
+                        color: 'text-red-500',
+                        description: 'Ensures security best practices',
+                        capabilities: ['Threat Modeling', 'Compliance'],
+                        new: true
+                    },
+                    {
+                        name: 'Compliance Officer',
+                        icon: 'fas fa-balance-scale',
+                        color: 'text-yellow-500',
+                        description: 'Validates compliance standards',
+                        capabilities: ['GDPR', 'HIPAA', 'SOC2'],
+                        new: true
+                    },
+                    {
+                        name: 'Threat Hunter',
+                        icon: 'fas fa-search',
+                        color: 'text-orange-500',
+                        description: 'Hunts for security threats',
+                        capabilities: ['Analysis', 'Detection'],
+                        new: true
+                    }
+                ],
+
+                async generateCode() {
+                    try {
+                        const response = await fetch(`${this.baseUrl}:30889/api/v1/workflows/generate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.codeGenRequest)
+                        });
+                        this.codeGenResponse = await response.json();
+                    } catch (error) {
+                        this.codeGenResponse = { error: error.message };
+                    }
+                },
+
+                async testLLM() {
+                    try {
+                        const response = await fetch(`${this.baseUrl}:30881/generate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                messages: [
+                                    { role: 'system', content: 'You are a helpful assistant.' },
+                                    { role: 'user', content: this.llmRequest.prompt }
+                                ],
+                                provider: this.llmRequest.provider,
+                                max_tokens: 200
+                            })
+                        });
+                        this.llmResponse = await response.json();
+                    } catch (error) {
+                        this.llmResponse = { content: 'Error: ' + error.message };
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
