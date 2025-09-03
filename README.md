@@ -8,19 +8,23 @@
 
 Enterprise-grade AI Software Factory Platform with service mesh architecture, multi-LLM support, and production-ready infrastructure.
 
-## 🚀 Current Status: Sprint 1 Complete (Infrastructure Ready)
+## 🚀 Current Status: OPERATIONAL - Workflow System Complete
 
 ### ✅ What's Running
-- **Infrastructure**: Full enterprise stack with Istio, PostgreSQL HA, monitoring
-- **Services**: LLM Router (3 replicas), Agent Orchestrator (2 replicas)
-- **Data Layer**: PostgreSQL HA (3 nodes), Redis, Qdrant vector DB
-- **Security**: mTLS, audit logging, zero-trust networking
+- **Infrastructure**: Kubernetes with Istio service mesh, PostgreSQL, Temporal
+- **Workflow Engine**: Temporal with 7-stage code generation pipeline
+- **LLM Integration**: Azure OpenAI and AWS Bedrock configured
+- **REST API**: Full workflow management API at http://192.168.1.177:30889
+- **Web UI**: Temporal dashboard at http://192.168.1.177:30888
+- **Services**: LLM Router, Workflow API, Workflow Workers
+- **Security**: mTLS, Istio authorization policies, zero-trust networking
 
-### 🔄 Coming in Sprint 2
-- GraphQL API Gateway
-- Next.js 14 Frontend
-- QLayer AI Engine (actual code generation)
-- Authentication system
+### 🎯 Completed Features
+- ✅ End-to-end code generation workflow
+- ✅ Multi-provider LLM support (Azure OpenAI working)
+- ✅ REST API for workflow triggering and monitoring
+- ✅ Graceful service degradation
+- ✅ Production-grade infrastructure with Istio
 
 ## 🚀 Quick Start
 
@@ -36,11 +40,15 @@ cd quantumlayer-platform
 kubectl apply -f infrastructure/kubernetes/
 
 # Access services
-# LLM Router API: http://192.168.7.235:30881
-# Agent Orchestrator: http://192.168.7.235:30882
-# PostgreSQL: 192.168.7.235:30432 (user: qlayer, pass: QuantumLayer2024!)
-# Qdrant: http://192.168.7.235:30633
-# Istio Gateway: http://192.168.7.241
+# Workflow REST API: http://192.168.1.177:30889
+# Temporal Web UI: http://192.168.1.177:30888
+# PostgreSQL: temporal namespace (user: qlayer, pass: QuantumLayer2024!)
+# Istio Gateway: http://192.168.1.177:31044 (HTTP) / :31564 (HTTPS)
+
+# Trigger a workflow
+curl -X POST http://192.168.1.177:30889/api/v1/workflows/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Create a Python hello world", "language": "python", "type": "function"}'
 ```
 
 ## 📚 Documentation
