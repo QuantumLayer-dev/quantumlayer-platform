@@ -1,0 +1,104 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-main
+  namespace: quantumlayer
+spec:
+  instances: 3
+  
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      effective_cache_size: "1GB"
+      maintenance_work_mem: "64MB"
+      checkpoint_completion_target: "0.9"
+      wal_buffers: "16MB"
+      default_statistics_target: "100"
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+      work_mem: "4MB"
+      min_wal_size: "1GB"
+      max_wal_size: "4GB"
+      max_worker_processes: "8"
+      max_parallel_workers_per_gather: "4"
+      max_parallel_workers: "8"
+      max_parallel_maintenance_workers: "4"
+      log_statement: "all"
+      log_duration: "on"
+      
+  bootstrap:
+    initdb:
+      database: quantumlayer
+      owner: qlayer
+      secret:
+        name: postgres-superuser-secret
+      dataChecksums: true
+      
+  storage:
+    size: 20Gi
+    storageClass: longhorn
+    
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
+      
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-superuser-secret
+  namespace: quantumlayer
+type: Opaque
+stringData:
+  username: postgres
+  password: QuantumLayer2024!
+  
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-app-secret
+  namespace: quantumlayer
+type: Opaque
+stringData:
+  username: qlayer
+  password: QuantumLayer2024!
+  
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  selector:
+    postgresql: postgres-main
+    role: primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+    
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica
+  namespace: quantumlayer
+spec:
+  type: ClusterIP
+  selector:
+    postgresql: postgres-main
+    role: replica
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres

@@ -1,0 +1,63 @@
+# Simple PostgreSQL deployment - no Helm, no operators, just works
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: quantumlayer
+data:
+  init.sql: |
+    CREATE DATABASE temporal;
+    CREATE DATABASE temporal_visibility;
+    CREATE USER temporal WITH PASSWORD 'temporal';
+    GRANT ALL PRIVILEGES ON DATABASE temporal TO temporal;
+    GRANT ALL PRIVILEGES ON DATABASE temporal_visibility TO temporal;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-simple
+  namespace: quantumlayer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-simple
+  template:
+    metadata:
+      labels:
+        app: postgres-simple
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:14
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "postgres"
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+          subPath: postgres
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+      volumes:
+      - name: postgres-storage
+        emptyDir: {}
+      - name: init-script
+        configMap:
+          name: postgres-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-simple
+  namespace: quantumlayer
+spec:
+  selector:
+    app: postgres-simple
+  ports:
+  - port: 5432
+    targetPort: 5432

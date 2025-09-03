@@ -41,6 +41,8 @@ spec:
         envFrom:
         - configMapRef:
             name: agent-orchestrator-config
+        - secretRef:
+            name: llm-credentials
         resources:
           requests:
             memory: "512Mi"

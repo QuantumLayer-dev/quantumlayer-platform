@@ -68,6 +68,8 @@ spec:
             name: meta-prompt-engine-config
         - secretRef:
             name: meta-prompt-engine-secrets
+        - secretRef:
+            name: llm-credentials
         resources:
           requests:
             memory: "256Mi"
@@ -252,7 +254,7 @@ spec:
         maxConnections: 100
       http:
         http1MaxPendingRequests: 50
-        h2MaxRequests: 100
+        http2MaxRequests: 100
     loadBalancer:
       simple: ROUND_ROBIN
     outlierDetection:

@@ -1,0 +1,45 @@
+# PostgreSQL Helm Values for QuantumLayer
+global:
+  postgresql:
+    auth:
+      postgresPassword: SuperSecret2024!
+      username: qlayer
+      password: QuantumLayer2024!
+      database: quantumlayer
+
+primary:
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
+  
+  initdb:
+    scripts:
+      init-databases.sql: |
+        CREATE DATABASE keycloak;
+        CREATE DATABASE temporal;
+        CREATE DATABASE temporal_visibility;
+        CREATE DATABASE mlflow;
+        GRANT ALL PRIVILEGES ON DATABASE keycloak TO qlayer;
+        GRANT ALL PRIVILEGES ON DATABASE temporal TO qlayer;
+        GRANT ALL PRIVILEGES ON DATABASE temporal_visibility TO qlayer;
+        GRANT ALL PRIVILEGES ON DATABASE mlflow TO qlayer;
+
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2"
+
+service:
+  type: ClusterIP
+  ports:
+    postgresql: 5432
+
+metrics:
+  enabled: false
+
+volumePermissions:
+  enabled: true

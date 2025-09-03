@@ -1,0 +1,48 @@
+# Allow Temporal namespace to access PostgreSQL in quantumlayer namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-temporal-to-postgres
+  namespace: quantumlayer
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: temporal
+    ports:
+    - protocol: TCP
+      port: 5432
+---
+# Allow Temporal pods to egress to quantumlayer
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-to-postgres
+  namespace: temporal
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: quantumlayer
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53

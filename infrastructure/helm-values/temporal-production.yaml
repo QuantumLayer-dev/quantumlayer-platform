@@ -1,13 +1,16 @@
-# Temporal Helm Values - Production Configuration
+# Temporal Production Configuration for QuantumLayer
 server:
   replicaCount: 1
   config:
     persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 4
       default:
         driver: "sql"
         sql:
           driver: "postgres12"
-          host: "postgres-postgresql.quantumlayer.svc.cluster.local"
+          host: "postgres-cluster-rw.quantumlayer.svc.cluster.local"
           port: 5432
           database: temporal
           user: qlayer
@@ -18,7 +21,7 @@ server:
         driver: "sql"
         sql:
           driver: "postgres12"
-          host: "postgres-postgresql.quantumlayer.svc.cluster.local"
+          host: "postgres-cluster-rw.quantumlayer.svc.cluster.local"
           port: 5432
           database: temporal_visibility
           user: qlayer
@@ -26,9 +29,28 @@ server:
           maxConns: 10
           maxConnLifetime: "1h"
 
-# Disable internal datastores
+# Component configurations
+frontend:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 7233
+
+history:
+  replicaCount: 1
+
+matching:
+  replicaCount: 1
+
+worker:
+  replicaCount: 1
+
+# Disable datastores we don't need
 cassandra:
   enabled: false
+  config:
+    cluster:
+      enabled: false
 
 elasticsearch:
   enabled: false
@@ -45,20 +67,33 @@ prometheus:
 grafana:
   enabled: false
 
-# Web UI
+# Web UI configuration
 web:
   enabled: true
+  replicaCount: 1
   service:
     type: NodePort
+    port: 8080
     nodePort: 30888
 
-# Admin tools for schema management
+# Admin tools
 admintools:
   enabled: true
+  image:
+    repository: temporalio/admin-tools
+    tag: 1.24.2
 
-# Schema setup
+# Schema management
 schema:
   setup:
     enabled: true
+    backoffLimit: 100
   update:
     enabled: true
+    backoffLimit: 100
+
+# Add this to work around the cassandra config requirement
+cassandra:
+  enabled: false
+  hosts:
+    - "unused"  # Dummy value to satisfy validation

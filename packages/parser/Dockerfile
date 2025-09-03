@@ -5,12 +5,15 @@ RUN apk add --no-cache git gcc musl-dev
 
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod go.sum ./
-RUN go mod download
+# Copy all required files
+COPY packages/parser/ ./
+COPY packages/shared/ ./shared/
 
-# Copy source code
-COPY . .
+# Fix module replacement if needed
+RUN if [ -f go.mod ]; then go mod edit -replace github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared=./shared || true; fi
+
+# Download dependencies and tidy
+RUN go mod tidy && go mod download
 
 # Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -o parser ./cmd/server/main.go

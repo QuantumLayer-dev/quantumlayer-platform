@@ -1,0 +1,108 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: quantumlayer-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"  # Allow any host for development
+    # In production, use:
+    # - "api.quantumlayer.ai"
+    # - "app.quantumlayer.ai"
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: api-gateway-vs
+  namespace: quantumlayer
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - istio-system/quantumlayer-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api
+    - uri:
+        prefix: /graphql
+    - uri:
+        prefix: /health
+    route:
+    - destination:
+        host: api-gateway.quantumlayer.svc.cluster.local
+        port:
+          number: 8080
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: llm-router-vs
+  namespace: quantumlayer
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - istio-system/quantumlayer-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /llm
+    rewrite:
+      uri: "/"
+    route:
+    - destination:
+        host: llm-router.quantumlayer.svc.cluster.local
+        port:
+          number: 8080
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: api-gateway-dr
+  namespace: quantumlayer
+spec:
+  host: api-gateway.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: llm-router-dr
+  namespace: quantumlayer
+spec:
+  host: llm-router.quantumlayer.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

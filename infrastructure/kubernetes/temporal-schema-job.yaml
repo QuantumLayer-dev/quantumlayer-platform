@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-schema-setup
+  namespace: quantumlayer
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: admin-tools
+        image: temporalio/admin-tools:latest
+        env:
+        - name: SQL_PLUGIN
+          value: postgres12
+        - name: SQL_HOST
+          valueFrom:
+            secretKeyRef:
+              name: temporal-db
+              key: host
+        - name: SQL_PORT
+          valueFrom:
+            secretKeyRef:
+              name: temporal-db
+              key: port
+        - name: SQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: temporal-db
+              key: user
+        - name: SQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: temporal-db
+              key: password
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          echo "Creating and migrating temporal database..."
+          
+          # Create temporal database
+          temporal-sql-tool --database temporal create-database || echo "Database temporal may already exist"
+          
+          # Setup schema for temporal database
+          SQL_DATABASE=temporal temporal-sql-tool setup-schema -v 0.0
+          SQL_DATABASE=temporal temporal-sql-tool update -schema-dir schema/postgresql/v12/temporal/versioned
+          
+          echo "Creating and migrating temporal_visibility database..."
+          
+          # Create temporal_visibility database
+          temporal-sql-tool --database temporal_visibility create-database || echo "Database temporal_visibility may already exist"
+          
+          # Setup schema for temporal_visibility database
+          SQL_DATABASE=temporal_visibility temporal-sql-tool setup-schema -v 0.0
+          SQL_DATABASE=temporal_visibility temporal-sql-tool update -schema-dir schema/postgresql/v12/visibility/versioned
+          
+          echo "Schema setup completed successfully!"

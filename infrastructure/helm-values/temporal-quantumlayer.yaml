@@ -1,4 +1,4 @@
-# Temporal Helm Values - Production Configuration
+# Temporal Helm Values for deployment in quantumlayer namespace
 server:
   replicaCount: 1
   config:
@@ -7,7 +7,7 @@ server:
         driver: "sql"
         sql:
           driver: "postgres12"
-          host: "postgres-postgresql.quantumlayer.svc.cluster.local"
+          host: "postgres-postgresql"  # Same namespace, so short name works
           port: 5432
           database: temporal
           user: qlayer
@@ -18,7 +18,7 @@ server:
         driver: "sql"
         sql:
           driver: "postgres12"
-          host: "postgres-postgresql.quantumlayer.svc.cluster.local"
+          host: "postgres-postgresql"
           port: 5432
           database: temporal_visibility
           user: qlayer

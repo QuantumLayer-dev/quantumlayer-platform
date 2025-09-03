@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-schema-setup
+  namespace: temporal
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: admin-tools
+        image: temporalio/admin-tools:latest
+        env:
+        - name: SQL_PLUGIN
+          value: postgres12
+        - name: SQL_HOST
+          value: postgres-postgresql.temporal.svc.cluster.local
+        - name: SQL_PORT
+          value: "5432"
+        - name: SQL_USER
+          value: postgres
+        - name: SQL_PASSWORD
+          value: changeme
+        command: ["/bin/bash","-lc"]
+        args:
+        - |
+          set -euo pipefail
+          echo "Init default DB"
+          temporal-sql-tool --database temporal create-database || true
+          SQL_DATABASE=temporal temporal-sql-tool setup-schema -v 0.0
+          SQL_DATABASE=temporal temporal-sql-tool update -schema-dir schema/postgresql/v12/temporal/versioned
+          echo "Init visibility DB"
+          temporal-sql-tool --database temporal_visibility create-database || true
+          SQL_DATABASE=temporal_visibility temporal-sql-tool setup-schema -v 0.0
+          SQL_DATABASE=temporal_visibility temporal-sql-tool update -schema-dir schema/postgresql/v12/visibility/versioned

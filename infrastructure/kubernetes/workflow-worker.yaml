@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workflow-worker
+  namespace: quantumlayer
+  labels:
+    app: workflow-worker
+    component: workflows
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: workflow-worker
+  template:
+    metadata:
+      labels:
+        app: workflow-worker
+        component: workflows
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      serviceAccountName: workflow-worker
+      containers:
+      - name: worker
+        image: ghcr.io/quantumlayer-dev/workflow-worker:latest
+        imagePullPolicy: Always
+        env:
+        - name: TEMPORAL_HOST
+          value: "temporal-frontend.temporal.svc.cluster.local:7233"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: WORKER_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "ps aux | grep worker"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+      imagePullSecrets:
+      - name: ghcr-secret
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: workflow-worker
+  namespace: quantumlayer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-worker
+  namespace: quantumlayer
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-worker
+  namespace: quantumlayer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: workflow-worker
+subjects:
+- kind: ServiceAccount
+  name: workflow-worker
+  namespace: quantumlayer
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: workflow-worker
+  namespace: quantumlayer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: workflow-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

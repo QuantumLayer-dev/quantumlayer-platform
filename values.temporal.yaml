@@ -1,0 +1,34 @@
+cassandra:
+  enabled: false
+
+elasticsearch:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+grafana:
+  enabled: false
+
+server:
+  replicaCount: 1
+  config:
+    persistence:
+      default:
+        driver: sql
+        sql:
+          pluginName: postgres12
+          host: postgres-postgresql.temporal.svc.cluster.local
+          port: 5432
+          database: temporal
+          user: postgres
+          password: changeme
+      visibility:
+        driver: sql
+        sql:
+          pluginName: postgres12
+          host: postgres-postgresql.temporal.svc.cluster.local
+          port: 5432
+          database: temporal_visibility
+          user: postgres
+          password: changeme
