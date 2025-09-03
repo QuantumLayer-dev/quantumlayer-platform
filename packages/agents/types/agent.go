@@ -9,16 +9,22 @@ import (
 type AgentRole string
 
 const (
-	RoleProjectManager AgentRole = "project-manager"
-	RoleArchitect      AgentRole = "architect"
-	RoleBackendDev     AgentRole = "backend-developer"
-	RoleFrontendDev    AgentRole = "frontend-developer"
-	RoleDatabaseAdmin  AgentRole = "database-admin"
-	RoleDevOps         AgentRole = "devops"
-	RoleQA             AgentRole = "qa-engineer"
-	RoleSecurity       AgentRole = "security"
-	RoleDataEngineer   AgentRole = "data-engineer"
-	RoleSRE            AgentRole = "sre"
+	RoleProjectManager     AgentRole = "project-manager"
+	RoleArchitect          AgentRole = "architect"
+	RoleBackendDev         AgentRole = "backend-developer"
+	RoleFrontendDev        AgentRole = "frontend-developer"
+	RoleDatabaseAdmin      AgentRole = "database-admin"
+	RoleDevOps             AgentRole = "devops"
+	RoleQA                 AgentRole = "qa-engineer"
+	RoleSecurity           AgentRole = "security"
+	RoleDataEngineer       AgentRole = "data-engineer"
+	RoleSRE                AgentRole = "sre"
+	// QSecure - Security Specialist Roles
+	RoleSecurityArchitect  AgentRole = "security-architect"
+	RoleComplianceOfficer  AgentRole = "compliance-officer"
+	RoleThreatHunter       AgentRole = "threat-hunter"
+	RoleIncidentResponder  AgentRole = "incident-responder"
+	RoleSecurityAuditor    AgentRole = "security-auditor"
 )
 
 // AgentStatus represents the current state of an agent
@@ -37,16 +43,24 @@ const (
 type AgentCapability string
 
 const (
-	CapRequirementsAnalysis AgentCapability = "requirements-analysis"
-	CapSystemDesign         AgentCapability = "system-design"
-	CapCodeGeneration       AgentCapability = "code-generation"
-	CapTestGeneration       AgentCapability = "test-generation"
-	CapInfrastructureSetup  AgentCapability = "infrastructure-setup"
-	CapSecurityAudit        AgentCapability = "security-audit"
+	CapRequirementsAnalysis    AgentCapability = "requirements-analysis"
+	CapSystemDesign            AgentCapability = "system-design"
+	CapCodeGeneration          AgentCapability = "code-generation"
+	CapTestGeneration          AgentCapability = "test-generation"
+	CapInfrastructureSetup     AgentCapability = "infrastructure-setup"
+	CapSecurityAudit           AgentCapability = "security-audit"
 	CapPerformanceOptimization AgentCapability = "performance-optimization"
-	CapDocumentation        AgentCapability = "documentation"
-	CapDataModeling         AgentCapability = "data-modeling"
-	CapMonitoringSetup      AgentCapability = "monitoring-setup"
+	CapDocumentation           AgentCapability = "documentation"
+	CapDataModeling            AgentCapability = "data-modeling"
+	CapMonitoringSetup         AgentCapability = "monitoring-setup"
+	// QSecure - Security Capabilities
+	CapabilityThreatModeling       AgentCapability = "threat-modeling"
+	CapabilitySecurityAnalysis     AgentCapability = "security-analysis"
+	CapabilityComplianceValidation AgentCapability = "compliance-validation"
+	CapabilityRiskAssessment       AgentCapability = "risk-assessment"
+	CapabilityIncidentResponse     AgentCapability = "incident-response"
+	CapabilityForensics            AgentCapability = "forensics"
+	CapabilityPenetrationTesting   AgentCapability = "penetration-testing"
 )
 
 // Message represents inter-agent communication
