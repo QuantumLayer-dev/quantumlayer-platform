@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-router
+  namespace: quantumlayer
+  labels:
+    app: llm-router
+    component: ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-router
+  template:
+    metadata:
+      labels:
+        app: llm-router
+        component: ai
+    spec:
+      containers:
+      - name: llm-router
+        image: ghcr.io/quantumlayer-dev/llm-router:latest
+        imagePullPolicy: Always
+        env:
+        - name: PORT
+          value: "8080"
+        - name: AZURE_OPENAI_ENDPOINT
+          value: "https://openai-uk-surya.openai.azure.com"
+        envFrom:
+        - secretRef:
+            name: llm-credentials
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+      imagePullSecrets:
+      - name: ghcr-secret
