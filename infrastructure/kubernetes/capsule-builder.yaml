@@ -1,99 +1,109 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
   labels:
-    app: sandbox-executor
-    component: execution
+    app: capsule-builder
+    component: builder
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: sandbox-executor
+      app: capsule-builder
   template:
     metadata:
       labels:
-        app: sandbox-executor
-        component: execution
+        app: capsule-builder
+        component: builder
     spec:
-      serviceAccountName: sandbox-executor
+      serviceAccountName: capsule-builder
       imagePullSecrets:
         - name: ghcr-secret
       securityContext:
         fsGroup: 1000
       containers:
-      - name: sandbox-executor
-        image: ghcr.io/quantumlayer-dev/sandbox-executor:latest
+      - name: capsule-builder
+        image: ghcr.io/quantumlayer-dev/capsule-builder:latest
         imagePullPolicy: Always
         ports:
-        - containerPort: 8085
+        - containerPort: 8086
           name: http
         env:
         - name: PORT
-          value: "8085"
-        - name: DOCKER_HOST
-          value: "tcp://localhost:2375"
+          value: "8086"
+        - name: NODE_ENV
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: BUILDER_TIMEOUT
+          value: "300000"
+        - name: MAX_CONCURRENT_BUILDS
+          value: "5"
+        - name: WORKSPACE_PATH
+          value: "/workspace"
+        - name: CACHE_PATH
+          value: "/cache"
+        - name: QUANTUM_DROPS_URL
+          value: "http://quantum-drops.quantumlayer.svc.cluster.local:8080"
+        - name: WORKFLOW_API_URL
+          value: "http://workflow-api.temporal.svc.cluster.local:8080"
         resources:
           requests:
-            memory: "256Mi"
+            memory: "512Mi"
             cpu: "200m"
           limits:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "1000m"
         livenessProbe:
           httpGet:
             path: /health
-            port: 8085
+            port: 8086
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /health
-            port: 8085
+            port: 8086
           initialDelaySeconds: 10
           periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
         volumeMounts:
         - name: workspace
           mountPath: /workspace
-      - name: dind
-        image: docker:24-dind
-        securityContext:
-          privileged: true
-        env:
-        - name: DOCKER_TLS_CERTDIR
-          value: ""
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "200m"
-          limits:
-            memory: "1Gi"
-            cpu: "1000m"
-        volumeMounts:
-        - name: docker-storage
-          mountPath: /var/lib/docker
+        - name: cache
+          mountPath: /cache
+        - name: tmp
+          mountPath: /tmp
       volumes:
-      - name: docker-storage
-        emptyDir: {}
       - name: workspace
-        emptyDir: {}
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: cache
+        emptyDir:
+          sizeLimit: 2Gi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
   labels:
-    app: sandbox-executor
+    app: capsule-builder
 spec:
   selector:
-    app: sandbox-executor
+    app: capsule-builder
   ports:
-  - port: 8085
-    targetPort: 8085
-    nodePort: 30884
+  - port: 8086
+    targetPort: 8086
+    nodePort: 30886
     name: http
   type: NodePort
 
@@ -101,48 +111,54 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
 rules:
 - apiGroups: [""]
   resources: ["pods", "pods/log", "pods/exec"]
   verbs: ["get", "list", "create", "delete", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list"]
 - apiGroups: ["batch"]
   resources: ["jobs"]
   verbs: ["get", "list", "create", "delete", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: sandbox-executor
+  name: capsule-builder
 subjects:
 - kind: ServiceAccount
-  name: sandbox-executor
+  name: capsule-builder
   namespace: quantumlayer
 
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: sandbox-executor-network-policy
+  name: capsule-builder-network-policy
   namespace: quantumlayer
 spec:
   podSelector:
     matchLabels:
-      app: sandbox-executor
+      app: capsule-builder
   policyTypes:
   - Ingress
   - Egress
@@ -151,9 +167,12 @@ spec:
     - namespaceSelector:
         matchLabels:
           name: quantumlayer
+    - namespaceSelector:
+        matchLabels:
+          name: temporal
     ports:
     - protocol: TCP
-      port: 8091
+      port: 8086
   egress:
   - to:
     - namespaceSelector: {}
@@ -168,6 +187,17 @@ spec:
           name: quantumlayer
     ports:
     - protocol: TCP
+      port: 8080  # Quantum Drops
+    - protocol: TCP
       port: 5432  # PostgreSQL
     - protocol: TCP
       port: 6379  # Redis
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: temporal
+    ports:
+    - protocol: TCP
+      port: 8080  # Workflow API
+    - protocol: TCP
+      port: 7233  # Temporal frontend

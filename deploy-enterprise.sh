@@ -1,522 +1,763 @@
 #!/bin/bash
 set -euo pipefail
 
-# Enterprise-Grade Deployment Script for QuantumLayer Platform
-# This script ensures all components are deployed with production standards
+# ═══════════════════════════════════════════════════════════════════════════════
+# QuantumLayer Enterprise Deployment Script
+# Production-grade deployment with security, monitoring, and high availability
+# ═══════════════════════════════════════════════════════════════════════════════
 
-NAMESPACE="quantumlayer"
-ENVIRONMENT="${1:-production}"
-CLUSTER="${2:-primary}"
+# Configuration
+NAMESPACE="${NAMESPACE:-quantumlayer}"
+REGISTRY="${REGISTRY:-localhost:5000}"
+ENVIRONMENT="${ENVIRONMENT:-production}"
+DEPLOY_MODE="${1:-all}" # all, sandbox, capsule, monitoring, security
 
-echo "═══════════════════════════════════════════════════════════════"
-echo "   QuantumLayer Enterprise Deployment"
-echo "   Environment: $ENVIRONMENT"
-echo "   Cluster: $CLUSTER"
-echo "═══════════════════════════════════════════════════════════════"
-
-# Color codes for output
+# Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
 
-# Function to print colored output
+# Logging
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_step() { echo -e "\n${BOLD}${BLUE}▶ $1${NC}"; }
 
-# Pre-flight checks
+# Banner
+print_banner() {
+    echo -e "${BOLD}${MAGENTA}"
+    cat << "EOF"
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                  QuantumLayer Enterprise Deployment                           ║
+║                     Production-Grade Infrastructure                           ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+EOF
+    echo -e "${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pre-flight Checks
+# ═══════════════════════════════════════════════════════════════════════════════
+
 preflight_checks() {
-    log_info "Running pre-flight checks..."
+    log_step "Running Pre-flight Checks"
     
-    # Check kubectl
-    if ! command -v kubectl &> /dev/null; then
-        log_error "kubectl not found. Please install kubectl."
-        exit 1
-    fi
-    
-    # Check helm
-    if ! command -v helm &> /dev/null; then
-        log_error "Helm not found. Please install Helm 3."
-        exit 1
-    fi
-    
-    # Check cluster connectivity
-    if ! kubectl cluster-info &> /dev/null; then
-        log_error "Cannot connect to Kubernetes cluster."
-        exit 1
-    fi
-    
-    # Check istioctl
-    if ! command -v istioctl &> /dev/null; then
-        log_warn "istioctl not found. Installing Istio..."
-        install_istio
-    fi
-    
-    log_info "Pre-flight checks passed ✓"
-}
-
-# Install Istio service mesh
-install_istio() {
-    log_info "Installing Istio service mesh..."
-    
-    # Download and install Istio
-    curl -L https://istio.io/downloadIstio | sh -
-    cd istio-*
-    export PATH=$PWD/bin:$PATH
-    
-    # Install Istio with default profile and production settings
-    istioctl install --set profile=default \
-        --set values.pilot.resources.requests.memory=512Mi \
-        --set values.pilot.resources.requests.cpu=250m \
-        --set values.global.proxy.resources.requests.cpu=100m \
-        --set values.global.proxy.resources.requests.memory=128Mi \
-        --set meshConfig.defaultConfig.proxyStatsMatcher.inclusionRegexps[0]=".*outlier_detection.*" \
-        --set meshConfig.defaultConfig.proxyStatsMatcher.inclusionRegexps[1]=".*circuit_breakers.*" \
-        --set meshConfig.defaultConfig.proxyStatsMatcher.inclusionRegexps[2]=".*upstream_rq_retry.*" \
-        --set meshConfig.defaultConfig.proxyStatsMatcher.inclusionRegexps[3]=".*upstream_rq_pending.*" \
-        --set meshConfig.defaultConfig.proxyStatsMatcher.inclusionRegexps[4]=".*_cx_.*" \
-        --set meshConfig.accessLogFile=/dev/stdout \
-        -y
-    
-    # Create namespace if it doesn't exist
-    kubectl create namespace $NAMESPACE || true
-    
-    # Enable injection for namespace
-    kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
-    
-    # Install addons (Kiali, Prometheus, Grafana, Jaeger)
-    kubectl apply -f samples/addons
-    
-    cd ..
-    log_info "Istio installed successfully ✓"
-}
-
-# Install cert-manager for TLS
-install_cert_manager() {
-    log_info "Installing cert-manager..."
-    
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
-    
-    # Wait for cert-manager to be ready
-    kubectl wait --for=condition=ready pod \
-        -l app.kubernetes.io/component=webhook \
-        -n cert-manager \
-        --timeout=120s
-    
-    # Create ClusterIssuer for Let's Encrypt
-    cat <<EOF | kubectl apply -f -
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: letsencrypt-prod
-spec:
-  acme:
-    server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@quantumlayer.ai
-    privateKeySecretRef:
-      name: letsencrypt-prod
-    solvers:
-    - http01:
-        ingress:
-          class: nginx
-EOF
-    
-    log_info "cert-manager installed ✓"
-}
-
-# Install External Secrets Operator
-install_external_secrets() {
-    log_info "Installing External Secrets Operator..."
-    
-    helm repo add external-secrets https://charts.external-secrets.io
-    helm repo update
-    
-    helm install external-secrets \
-        external-secrets/external-secrets \
-        -n external-secrets-system \
-        --create-namespace \
-        --set installCRDs=true \
-        --set webhook.port=9443
-    
-    log_info "External Secrets Operator installed ✓"
-}
-
-# Install monitoring stack
-install_monitoring() {
-    log_info "Installing Prometheus Stack..."
-    
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    helm repo update
-    
-    helm install kube-prometheus-stack \
-        prometheus-community/kube-prometheus-stack \
-        -n monitoring \
-        --create-namespace \
-        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-        --set grafana.adminPassword=admin
-    
-    log_info "Monitoring stack installed ✓"
-}
-
-# Install ArgoCD for GitOps
-install_argocd() {
-    log_info "Installing ArgoCD..."
-    
-    kubectl create namespace argocd || true
-    kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-    
-    # Wait for ArgoCD to be ready
-    kubectl wait --for=condition=ready pod \
-        -l app.kubernetes.io/name=argocd-server \
-        -n argocd \
-        --timeout=300s
-    
-    # Apply ArgoCD applications (skip if file has issues)
-    # kubectl apply -f infrastructure/argocd/applications.yaml
-    
-    log_info "ArgoCD installed ✓"
-}
-
-# Deploy PostgreSQL with HA
-deploy_postgres_ha() {
-    log_info "Deploying PostgreSQL with High Availability..."
-    
-    # Install CloudNativePG operator
-    kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.20/releases/cnpg-1.20.0.yaml
-    
-    # Wait for operator
-    kubectl wait --for=condition=ready pod \
-        -l app.kubernetes.io/name=cloudnative-pg \
-        -n cnpg-system \
-        --timeout=120s
-    
-    # Deploy PostgreSQL cluster
-    kubectl apply -f infrastructure/kubernetes/postgres-ha.yaml
-    
-    log_info "PostgreSQL HA deployed ✓"
-}
-
-# Install Temporal workflow engine
-install_temporal() {
-    log_info "Installing Temporal workflow engine..."
-    
-    helm repo add temporal https://temporalio.github.io/helm-charts
-    helm repo update
-    
-    # Install Temporal with PostgreSQL backend
-    helm install temporal temporal/temporal \
-        -n $NAMESPACE \
-        -f infrastructure/helm-values/temporal-values.yaml \
-        --wait --timeout 5m
-    
-    log_info "Temporal installed successfully ✓"
-}
-
-# Install NATS with JetStream
-install_nats() {
-    log_info "Installing NATS with JetStream..."
-    
-    helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    helm repo update
-    
-    # Create NATS values file if it doesn't exist
-    if [ ! -f infrastructure/helm-values/nats-values.yaml ]; then
-        cat <<EOF > infrastructure/helm-values/nats-values.yaml
-# NATS Configuration for QuantumLayer
-nats:
-  jetstream:
-    enabled: true
-    memStorage:
-      enabled: true
-      size: 1Gi
-    fileStorage:
-      enabled: true
-      size: 10Gi
-      storageDirectory: /data
-    
-  cluster:
-    enabled: true
-    replicas: 3
-    
-  natsbox:
-    enabled: true
-    
-  service:
-    ports:
-      client:
-        port: 4222
-      cluster:
-        port: 6222
-      monitor:
-        port: 8222
-      leafnodes:
-        port: 7422
-        
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-EOF
-    fi
-    
-    helm install nats nats/nats \
-        -n $NAMESPACE \
-        -f infrastructure/helm-values/nats-values.yaml \
-        --wait --timeout 5m
-    
-    log_info "NATS JetStream installed successfully ✓"
-}
-
-# Setup Clerk authentication
-setup_clerk() {
-    log_info "Setting up Clerk authentication..."
-    
-    # Create Clerk secrets template if not exists
-    if [ ! -f infrastructure/kubernetes/clerk-secrets.yaml ]; then
-        cat <<EOF > infrastructure/kubernetes/clerk-secrets.yaml
-# Clerk Authentication Secrets
-# IMPORTANT: Replace the placeholder values with your actual Clerk keys
-apiVersion: v1
-kind: Secret
-metadata:
-  name: clerk-secrets
-  namespace: $NAMESPACE
-type: Opaque
-stringData:
-  CLERK_SECRET_KEY: "sk_test_REPLACE_WITH_YOUR_SECRET_KEY"
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_REPLACE_WITH_YOUR_PUBLISHABLE_KEY"
-  CLERK_JWT_VERIFICATION_KEY: |
-    -----BEGIN PUBLIC KEY-----
-    REPLACE_WITH_YOUR_JWT_VERIFICATION_KEY
-    -----END PUBLIC KEY-----
-EOF
-        log_warn "Created clerk-secrets.yaml template. Please update with your actual Clerk keys!"
-    fi
-    
-    # Check if secrets already exist
-    if kubectl get secret clerk-secrets -n $NAMESPACE &> /dev/null; then
-        log_info "Clerk secrets already configured ✓"
-    else
-        log_warn "Please configure Clerk secrets in infrastructure/kubernetes/clerk-secrets.yaml"
-        log_warn "Then run: kubectl apply -f infrastructure/kubernetes/clerk-secrets.yaml"
-    fi
-}
-
-# Deploy core services
-deploy_services() {
-    log_info "Deploying core services..."
-    
-    # Create namespace
-    kubectl create namespace $NAMESPACE || true
-    
-    # Label namespace for Istio injection if not already done
-    kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite
-    
-    # Apply network policies
-    kubectl apply -f infrastructure/kubernetes/network-policies.yaml
-    
-    # Apply Istio configuration
-    kubectl apply -f infrastructure/kubernetes/istio-config.yaml
-    
-    # Deploy data services
-    log_info "Deploying data services..."
-    kubectl apply -f infrastructure/kubernetes/redis.yaml
-    kubectl apply -f infrastructure/kubernetes/qdrant.yaml
-    
-    # Deploy application services
-    log_info "Deploying application services..."
-    kubectl apply -f infrastructure/kubernetes/llm-router.yaml
-    kubectl apply -f infrastructure/kubernetes/agent-orchestrator.yaml
-    kubectl apply -f infrastructure/kubernetes/meta-prompt-engine.yaml
-    kubectl apply -f infrastructure/kubernetes/parser.yaml
-    
-    # Deploy API Gateway if exists
-    if [ -f infrastructure/kubernetes/api-gateway.yaml ]; then
-        kubectl apply -f infrastructure/kubernetes/api-gateway.yaml
-    else
-        log_warn "API Gateway manifest not found, skipping..."
-    fi
-    
-    # Apply monitoring
-    kubectl apply -f infrastructure/kubernetes/monitoring.yaml
-    
-    log_info "Core services deployed ✓"
-}
-
-# Validate deployment
-validate_deployment() {
-    log_info "Validating deployment..."
-    
-    # Check pod status
-    kubectl get pods -n $NAMESPACE
-    
-    # Check services
-    kubectl get svc -n $NAMESPACE
-    
-    # Check ingress
-    kubectl get ingress -n $NAMESPACE
-    
-    # Run health checks
-    for service in llm-router agent-orchestrator; do
-        POD=$(kubectl get pod -n $NAMESPACE -l app=$service -o jsonpath="{.items[0].metadata.name}")
-        if [ ! -z "$POD" ]; then
-            kubectl exec -n $NAMESPACE $POD -- wget -O- http://localhost:8080/health || true
+    # Check required tools
+    for tool in kubectl docker helm; do
+        if command -v $tool &> /dev/null; then
+            log_info "✓ $tool installed"
+        else
+            log_error "✗ $tool not found"
+            exit 1
         fi
     done
     
-    log_info "Deployment validation complete ✓"
+    # Check cluster connectivity
+    if kubectl cluster-info &> /dev/null; then
+        log_info "✓ Kubernetes cluster accessible"
+    else
+        log_error "✗ Cannot connect to Kubernetes cluster"
+        exit 1
+    fi
+    
+    # Check namespace
+    if ! kubectl get namespace $NAMESPACE &> /dev/null; then
+        log_info "Creating namespace $NAMESPACE"
+        kubectl create namespace $NAMESPACE
+        kubectl label namespace $NAMESPACE \
+            environment=$ENVIRONMENT \
+            managed-by=quantumlayer \
+            security=enforced
+    fi
 }
 
-# Generate deployment report
-generate_report() {
-    log_info "Generating deployment report..."
+# ═══════════════════════════════════════════════════════════════════════════════
+# Security Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy_security_policies() {
+    log_step "Deploying Security Policies"
     
-    cat <<EOF > deployment-report.txt
-═══════════════════════════════════════════════════════════════
-QuantumLayer Platform Deployment Report
-Generated: $(date)
-Environment: $ENVIRONMENT
-Cluster: $CLUSTER
-═══════════════════════════════════════════════════════════════
-
-SERVICES STATUS:
-$(kubectl get pods -n $NAMESPACE)
-
-ENDPOINTS:
-- API Gateway: https://api.quantumlayer.ai (NodePort: 30880)
-- LLM Router: https://llm.quantumlayer.ai (NodePort: 30881)
-- Agent Orchestrator: https://agent.quantumlayer.ai (NodePort: 30882)
-- Meta Prompt Engine: NodePort 30885
-- Redis: NodePort 30379
-- Qdrant: http://192.168.7.235:30633
-- Temporal UI: http://temporal.quantumlayer.ai:8080
-- NATS: nats://nats:4222 (internal)
-- Grafana: https://grafana.quantumlayer.ai
-- ArgoCD: https://argocd.quantumlayer.ai
-
-MONITORING:
-- Prometheus: http://prometheus.monitoring:9090
-- Grafana: http://grafana.monitoring:3000
-- Jaeger: http://jaeger.istio-system:16686
-- NATS Monitor: http://nats:8222
-
-SECURITY:
-✓ mTLS enabled via Istio
-✓ Network policies applied
-✓ RBAC configured
-✓ Secrets encrypted via External Secrets
-✓ Audit logging enabled
-
-COMPLIANCE:
-✓ GDPR data handling configured
-✓ SOC2 audit trails enabled
-✓ Encryption at rest enabled
-✓ Encryption in transit enabled
-
-HIGH AVAILABILITY:
-✓ PostgreSQL: 3 replicas with automatic failover
-✓ Redis: Sentinel mode with 3 nodes
-✓ Services: Multiple replicas with HPA
-✓ Cross-region backup configured
-
-═══════════════════════════════════════════════════════════════
+    # Pod Security Policy
+    cat <<EOF | kubectl apply -f -
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: quantumlayer-restricted
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  readOnlyRootFilesystem: false
 EOF
     
-    log_info "Report saved to deployment-report.txt"
+    # Network Policies
+    cat <<EOF | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quantumlayer-network-policy
+  namespace: $NAMESPACE
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: $NAMESPACE
+        - namespaceSelector:
+            matchLabels:
+              name: temporal
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: $NAMESPACE
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: temporal
+EOF
+    
+    log_info "✓ Security policies deployed"
 }
 
-# Main deployment flow
+# ═══════════════════════════════════════════════════════════════════════════════
+# Build and Push Images
+# ═══════════════════════════════════════════════════════════════════════════════
+
+build_and_push_images() {
+    log_step "Building and Pushing Docker Images"
+    
+    # Build with security scanning
+    build_with_scan() {
+        local service=$1
+        local path=$2
+        
+        log_info "Building $service..."
+        cd $path
+        
+        # Build image
+        docker build -t $REGISTRY/$service:latest .
+        
+        # Security scan with Trivy (if available)
+        if command -v trivy &> /dev/null; then
+            log_info "Scanning $service for vulnerabilities..."
+            trivy image --severity HIGH,CRITICAL $REGISTRY/$service:latest || log_warn "Vulnerabilities found"
+        fi
+        
+        # Push to registry
+        docker push $REGISTRY/$service:latest
+        cd - > /dev/null
+    }
+    
+    # Build services
+    if [[ "$DEPLOY_MODE" == "all" || "$DEPLOY_MODE" == "sandbox" ]]; then
+        build_with_scan "sandbox-executor" "packages/sandbox-executor"
+    fi
+    
+    if [[ "$DEPLOY_MODE" == "all" || "$DEPLOY_MODE" == "capsule" ]]; then
+        build_with_scan "capsule-builder" "packages/capsule-builder"
+    fi
+    
+    log_info "✓ Images built and pushed"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deploy Sandbox Executor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy_sandbox_executor() {
+    log_step "Deploying Sandbox Executor with Enterprise Configuration"
+    
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-executor-config
+  namespace: $NAMESPACE
+data:
+  config.yaml: |
+    server:
+      port: 8091
+      timeout: 30s
+    security:
+      max_execution_time: 60s
+      max_memory: 2Gi
+      max_cpu: 2
+      allowed_languages:
+        - python
+        - javascript
+        - typescript
+        - go
+        - java
+        - rust
+    observability:
+      metrics_enabled: true
+      tracing_enabled: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+  labels:
+    app: sandbox-executor
+    version: v1
+    component: execution
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: sandbox-executor
+  template:
+    metadata:
+      labels:
+        app: sandbox-executor
+        version: v1
+        component: execution
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8091"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: sandbox-executor
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: sandbox-executor
+        image: $REGISTRY/sandbox-executor:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8091
+          name: http
+          protocol: TCP
+        - containerPort: 9090
+          name: metrics
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "$ENVIRONMENT"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: DOCKER_HOST
+          value: "tcp://localhost:2375"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8091
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8091
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: config
+          mountPath: /etc/sandbox
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+      - name: dind
+        image: docker:24-dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+        volumeMounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+        - name: docker-storage
+          mountPath: /var/lib/docker
+      volumes:
+      - name: config
+        configMap:
+          name: sandbox-executor-config
+      - name: docker-socket
+        emptyDir: {}
+      - name: docker-storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+  labels:
+    app: sandbox-executor
+spec:
+  type: ClusterIP
+  selector:
+    app: sandbox-executor
+  ports:
+  - name: http
+    port: 8091
+    targetPort: 8091
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "create", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sandbox-executor
+subjects:
+- kind: ServiceAccount
+  name: sandbox-executor
+  namespace: $NAMESPACE
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sandbox-executor
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-executor
+  namespace: $NAMESPACE
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sandbox-executor
+EOF
+    
+    # Wait for deployment
+    kubectl rollout status deployment/sandbox-executor -n $NAMESPACE --timeout=300s
+    log_info "✓ Sandbox Executor deployed"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deploy Capsule Builder
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy_capsule_builder() {
+    log_step "Deploying Capsule Builder with Enterprise Templates"
+    
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capsule-builder-config
+  namespace: $NAMESPACE
+data:
+  config.yaml: |
+    server:
+      port: 8092
+    storage:
+      type: s3
+      bucket: quantum-capsules
+    templates:
+      - language: python
+        frameworks: [fastapi, flask, django]
+      - language: javascript
+        frameworks: [express, react, vue]
+      - language: go
+        frameworks: [gin, echo, fiber]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capsule-builder
+  namespace: $NAMESPACE
+  labels:
+    app: capsule-builder
+    version: v1
+    component: builder
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: capsule-builder
+  template:
+    metadata:
+      labels:
+        app: capsule-builder
+        version: v1
+        component: builder
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8092"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: capsule-builder
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: capsule-builder
+        image: $REGISTRY/capsule-builder:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8092
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: ENVIRONMENT
+          value: "$ENVIRONMENT"
+        - name: QUANTUM_DROPS_URL
+          value: "http://quantum-drops.$NAMESPACE.svc.cluster.local:8090"
+        - name: S3_ENDPOINT
+          value: "http://minio.$NAMESPACE.svc.cluster.local:9000"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8092
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8092
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        volumeMounts:
+        - name: config
+          mountPath: /etc/capsule
+      volumes:
+      - name: config
+        configMap:
+          name: capsule-builder-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: capsule-builder
+  namespace: $NAMESPACE
+  labels:
+    app: capsule-builder
+spec:
+  type: ClusterIP
+  selector:
+    app: capsule-builder
+  ports:
+  - name: http
+    port: 8092
+    targetPort: 8092
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: capsule-builder
+  namespace: $NAMESPACE
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: capsule-builder
+  namespace: $NAMESPACE
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: capsule-builder
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+EOF
+    
+    kubectl rollout status deployment/capsule-builder -n $NAMESPACE --timeout=300s
+    log_info "✓ Capsule Builder deployed"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Deploy Monitoring Stack
+# ═══════════════════════════════════════════════════════════════════════════════
+
+deploy_monitoring() {
+    log_step "Deploying Monitoring Stack"
+    
+    # Add Prometheus Helm repo
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo update
+    
+    # Install Prometheus Stack
+    helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+        --namespace monitoring \
+        --create-namespace \
+        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+        --set grafana.adminPassword=quantumlayer2024 \
+        --wait
+    
+    # Create ServiceMonitor for our services
+    cat <<EOF | kubectl apply -f -
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: quantumlayer-services
+  namespace: $NAMESPACE
+spec:
+  selector:
+    matchLabels:
+      app: sandbox-executor
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: capsule-builder
+  namespace: $NAMESPACE
+spec:
+  selector:
+    matchLabels:
+      app: capsule-builder
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+EOF
+    
+    log_info "✓ Monitoring stack deployed"
+    log_info "  Grafana: kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80"
+    log_info "  Username: admin / Password: quantumlayer2024"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Integration Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+run_integration_tests() {
+    log_step "Running Integration Tests"
+    
+    # Test Sandbox Executor
+    log_info "Testing Sandbox Executor..."
+    kubectl run test-sandbox --image=curlimages/curl:latest -n $NAMESPACE --rm -it --restart=Never -- \
+        curl -X POST http://sandbox-executor:8091/api/v1/execute \
+        -H "Content-Type: application/json" \
+        -d '{"language":"python","code":"print(\"Hello, Enterprise!\")"}' || true
+    
+    # Test Capsule Builder
+    log_info "Testing Capsule Builder..."
+    kubectl run test-capsule --image=curlimages/curl:latest -n $NAMESPACE --rm -it --restart=Never -- \
+        curl -X GET http://capsule-builder:8092/api/v1/templates || true
+    
+    log_info "✓ Integration tests completed"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Status Report
+# ═══════════════════════════════════════════════════════════════════════════════
+
+show_status() {
+    log_step "Deployment Status"
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo " Deployments"
+    echo "═══════════════════════════════════════════════════════════════"
+    kubectl get deployments -n $NAMESPACE
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo " Pods"
+    echo "═══════════════════════════════════════════════════════════════"
+    kubectl get pods -n $NAMESPACE
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo " Services"
+    echo "═══════════════════════════════════════════════════════════════"
+    kubectl get services -n $NAMESPACE
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo " HPA Status"
+    echo "═══════════════════════════════════════════════════════════════"
+    kubectl get hpa -n $NAMESPACE
+    
+    echo ""
+    log_info "✓ Deployment complete!"
+    echo ""
+    echo "Access points:"
+    echo "  • Sandbox Executor: kubectl port-forward -n $NAMESPACE svc/sandbox-executor 8091:8091"
+    echo "  • Capsule Builder: kubectl port-forward -n $NAMESPACE svc/capsule-builder 8092:8092"
+    echo "  • Grafana: kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main Execution
+# ═══════════════════════════════════════════════════════════════════════════════
+
 main() {
+    print_banner
     preflight_checks
     
-    # Install infrastructure components
-    install_cert_manager
-    install_external_secrets
-    install_monitoring
-    install_argocd
+    case "$DEPLOY_MODE" in
+        all)
+            deploy_security_policies
+            build_and_push_images
+            deploy_sandbox_executor
+            deploy_capsule_builder
+            deploy_monitoring
+            run_integration_tests
+            ;;
+        sandbox)
+            build_and_push_images
+            deploy_sandbox_executor
+            ;;
+        capsule)
+            build_and_push_images
+            deploy_capsule_builder
+            ;;
+        monitoring)
+            deploy_monitoring
+            ;;
+        security)
+            deploy_security_policies
+            ;;
+        test)
+            run_integration_tests
+            ;;
+        *)
+            log_error "Invalid deploy mode: $DEPLOY_MODE"
+            echo "Usage: $0 [all|sandbox|capsule|monitoring|security|test]"
+            exit 1
+            ;;
+    esac
     
-    # Deploy database
-    deploy_postgres_ha
-    
-    # Install workflow and messaging systems
-    install_temporal
-    install_nats
-    
-    # Setup authentication
-    setup_clerk
-    
-    # Deploy application services
-    deploy_services
-    
-    # Validate
-    validate_deployment
-    
-    # Generate report
-    generate_report
-    
-    echo ""
-    log_info "═══════════════════════════════════════════════════════════════"
-    log_info "   Deployment Complete!"
-    log_info "   Environment: $ENVIRONMENT"
-    log_info "   Status: READY"
-    log_info "═══════════════════════════════════════════════════════════════"
-    echo ""
-    
-    # Show next steps
-    cat <<EOF
-Next Steps:
-1. Configure Clerk Authentication:
-   - Sign up at https://clerk.com
-   - Create an application
-   - Get your Secret Key and Publishable Key
-   - Update infrastructure/kubernetes/clerk-secrets.yaml
-   - Apply: kubectl apply -f infrastructure/kubernetes/clerk-secrets.yaml
-
-2. Configure DNS records for:
-   - api.quantumlayer.ai → Load Balancer IP
-   - temporal.quantumlayer.ai → Load Balancer IP
-   - *.quantumlayer.ai → Load Balancer IP
-
-3. Access Temporal UI:
-   kubectl port-forward svc/temporal-web -n quantumlayer 8088:8088
-   Then visit: http://localhost:8088
-
-4. Access NATS Monitoring:
-   kubectl port-forward svc/nats -n quantumlayer 8222:8222
-   Then visit: http://localhost:8222
-
-5. Access ArgoCD UI:
-   kubectl port-forward svc/argocd-server -n argocd 8080:443
-   Username: admin
-   Password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-
-6. Access Grafana Dashboard:
-   kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
-   Username: admin
-   Password: admin
-
-7. Configure LLM API Keys:
-   - OpenAI API Key
-   - Anthropic API Key
-   - AWS Bedrock credentials
-   - Azure OpenAI endpoint
-   Update: kubectl edit secret llm-secrets -n quantumlayer
-
-8. Initialize Temporal Schema:
-   kubectl exec -it temporal-admintools-0 -n quantumlayer -- temporal-sql-tool create-database
-   kubectl exec -it temporal-admintools-0 -n quantumlayer -- temporal-sql-tool setup-schema -v 0.0
-
-9. Test Services:
-   curl http://<node-ip>:30880/health  # API Gateway
-   curl http://<node-ip>:30881/health  # LLM Router
-   curl http://<node-ip>:30882/health  # Agent Orchestrator
-
-EOF
+    show_status
 }
 
-# Run main function
+# Run main
 main "$@"

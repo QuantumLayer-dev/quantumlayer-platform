@@ -22,6 +22,8 @@ NodePorts are cluster-wide and must be unique across ALL namespaces. This docume
 | Grafana | 3000 | 30301 | Dashboards | Reserved |
 | LLM Router | 8080 | 30881 | LLM Service | Reserved |
 | Agent Orchestrator | 8090 | 30890 | Agent Service | Reserved |
+| Sandbox Executor | 8085 | 30884 | Docker-in-Docker Executor | ✅ Active |
+| Capsule Builder | 8086 | 30886 | Application Builder | ✅ Active |
 
 ## Other Namespaces (for reference)
 
