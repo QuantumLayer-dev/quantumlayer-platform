@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/workflows/internal/types"
 )
@@ -67,21 +69,44 @@ type DocumentationResult struct {
 
 // EnhancePromptActivity enhances the prompt using Meta Prompt Engine
 func EnhancePromptActivity(ctx context.Context, request types.PromptEnhancementRequest) (*types.PromptEnhancementResult, error) {
+	// Log the attempt
+	fmt.Printf("[EnhancePromptActivity] Calling Meta-Prompt Engine at %s\n", MetaPromptURL)
+	
 	// Try to call Meta Prompt Engine service
 	payload, _ := json.Marshal(request)
-	resp, err := http.Post(
-		fmt.Sprintf("%s/enhance", MetaPromptURL),
-		"application/json",
-		bytes.NewBuffer(payload),
-	)
 	
-	// If service is unavailable or returns non-200, use fallback
-	if err != nil || (resp != nil && resp.StatusCode != http.StatusOK) {
-		// Log that we're using fallback (in production, use proper logger)
-		fmt.Printf("Meta-prompt engine unavailable, using fallback enhancement\n")
-		if resp != nil {
-			resp.Body.Close()
-		}
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second, // 10 second timeout
+	}
+	
+	// Create request
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/enhance", MetaPromptURL), bytes.NewBuffer(payload))
+	if err != nil {
+		fmt.Printf("[EnhancePromptActivity] ERROR: Failed to create request: %v\n", err)
+		return nil, fmt.Errorf("failed to create meta-prompt request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Execute request
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[EnhancePromptActivity] WARNING: Meta-prompt engine unavailable: %v, using fallback\n", err)
+		// Fallback to basic enhancement
+		return &types.PromptEnhancementResult{
+			EnhancedPrompt: improvePrompt(request.OriginalPrompt, request.Type),
+			SystemPrompt:   getSystemPrompt(request.Type),
+			Tokens:         len(strings.Fields(request.OriginalPrompt)) * 2,
+		}, nil
+	}
+	defer resp.Body.Close()
+	
+	fmt.Printf("[EnhancePromptActivity] Response status: %d\n", resp.StatusCode)
+	
+	// If service returns non-200, use fallback
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[EnhancePromptActivity] WARNING: Non-200 response: %d, body: %s, using fallback\n", resp.StatusCode, string(body))
 		// Fallback to basic enhancement
 		return &types.PromptEnhancementResult{
 			EnhancedPrompt: improvePrompt(request.OriginalPrompt, request.Type),
@@ -167,6 +192,9 @@ func ParseRequirementsActivity(ctx context.Context, request types.CodeGeneration
 
 // GenerateCodeActivity generates code using the LLM Router
 func GenerateCodeActivity(ctx context.Context, request LLMGenerationRequest) (*LLMGenerationResult, error) {
+	// Log the attempt
+	fmt.Printf("[GenerateCodeActivity] Calling LLM Router at %s with provider %s\n", LLMRouterURL, request.Provider)
+	
 	// Prepare the LLM request
 	llmRequest := map[string]interface{}{
 		"messages": []map[string]string{
@@ -179,27 +207,69 @@ func GenerateCodeActivity(ctx context.Context, request LLMGenerationRequest) (*L
 	}
 
 	payload, _ := json.Marshal(llmRequest)
-	resp, err := http.Post(
-		fmt.Sprintf("%s/generate", LLMRouterURL),
-		"application/json",
-		bytes.NewBuffer(payload),
-	)
+	
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second, // 30 second timeout for LLM calls
+	}
+	
+	// Create request
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/generate", LLMRouterURL), bytes.NewBuffer(payload))
 	if err != nil {
+		fmt.Printf("[GenerateCodeActivity] ERROR: Failed to create request: %v\n", err)
+		return nil, fmt.Errorf("failed to create LLM request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Execute request
+	fmt.Printf("[GenerateCodeActivity] Sending request to %s/generate\n", LLMRouterURL)
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("[GenerateCodeActivity] ERROR: HTTP request failed: %v\n", err)
 		return nil, fmt.Errorf("failed to call LLM router: %w", err)
 	}
 	defer resp.Body.Close()
-
-	var llmResponse map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&llmResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode LLM response: %w", err)
+	
+	fmt.Printf("[GenerateCodeActivity] Response status: %d\n", resp.StatusCode)
+	
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[GenerateCodeActivity] ERROR: Non-200 response: %d, body: %s\n", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("LLM router returned status %d: %s", resp.StatusCode, string(body))
 	}
 
+	// Read and decode response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("[GenerateCodeActivity] ERROR: Failed to read response body: %v\n", err)
+		return nil, fmt.Errorf("failed to read LLM response: %w", err)
+	}
+	
+	fmt.Printf("[GenerateCodeActivity] Response body length: %d bytes\n", len(body))
+	
+	var llmResponse map[string]interface{}
+	if err := json.Unmarshal(body, &llmResponse); err != nil {
+		fmt.Printf("[GenerateCodeActivity] ERROR: Failed to decode response: %v, body: %s\n", err, string(body))
+		return nil, fmt.Errorf("failed to decode LLM response: %w", err)
+	}
+	
+	fmt.Printf("[GenerateCodeActivity] Successfully decoded LLM response\n")
+
 	// Extract the generated code and metrics
+	content, ok := llmResponse["content"].(string)
+	if !ok {
+		fmt.Printf("[GenerateCodeActivity] ERROR: No content in response: %+v\n", llmResponse)
+		return nil, fmt.Errorf("no content in LLM response")
+	}
+	
 	result := &LLMGenerationResult{
-		Content:  extractCode(llmResponse["content"].(string)),
+		Content:  extractCode(content),
 		Provider: request.Provider,
 		Model:    "gpt-4", // Default
 	}
+	
+	fmt.Printf("[GenerateCodeActivity] Generated content length: %d\n", len(result.Content))
 
 	// Extract token counts if available
 	if usage, ok := llmResponse["usage"].(map[string]interface{}); ok {

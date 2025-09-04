@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -56,12 +56,12 @@ Format as markdown with clear sections and subsections.`, request.Type, request.
 
 	llmResult, err := GenerateCodeActivity(ctx, llmRequest)
 	if err != nil {
-		// Fallback to template
-		return &FRDGenerationResult{
-			Content: generateFRDTemplate(request),
-		}, nil
+		// Don't fallback to template - propagate the error
+		fmt.Printf("[GenerateFRDActivity] ERROR: Failed to generate FRD via LLM: %v\n", err)
+		return nil, fmt.Errorf("failed to generate FRD: %w", err)
 	}
 
+	fmt.Printf("[GenerateFRDActivity] Successfully generated FRD, content length: %d\n", len(llmResult.Content))
 	return &FRDGenerationResult{
 		Content: llmResult.Content,
 	}, nil
@@ -128,8 +128,16 @@ func ValidateSemanticActivity(ctx context.Context, request SemanticValidationReq
 		bytes.NewBuffer(payload),
 	)
 	
-	if err != nil || (resp != nil && resp.StatusCode != http.StatusOK) {
-		// Fallback to basic validation
+	if err != nil {
+		fmt.Printf("[ValidateSemanticActivity] WARNING: Parser service unavailable: %v, using basic validation\n", err)
+		// For validation, we can use basic validation as it's not critical
+		return performBasicSemanticValidation(request), nil
+	}
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[ValidateSemanticActivity] WARNING: Parser returned %d: %s, using basic validation\n", resp.StatusCode, string(body))
+		// For validation, we can use basic validation as it's not critical
 		return performBasicSemanticValidation(request), nil
 	}
 	defer resp.Body.Close()
@@ -964,7 +972,7 @@ func StoreQuantumDropActivity(ctx context.Context, drop types.QuantumDrop) error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to store drop: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
