@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -67,6 +68,7 @@ func main() {
 	http.HandleFunc("/ready", readyHandler)
 	http.HandleFunc("/api/v1/complete", completeHandler)
 	http.HandleFunc("/v1/chat/completions", completeHandler) // OpenAI compatible
+	http.HandleFunc("/generate", generateHandler) // Workflow compatible
 	
 	// Start server
 	srv := &http.Server{
@@ -209,12 +211,82 @@ func completeHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// generateHandler handles /generate endpoint for workflow compatibility
+func generateHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	// Parse request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request", http.StatusBadRequest)
+		return
+	}
+	
+	// The workflow sends messages in OpenAI format with provider field
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+		MaxTokens   int     `json:"max_tokens,omitempty"`
+		Provider    string  `json:"provider,omitempty"`
+		Temperature float64 `json:"temperature,omitempty"`
+	}
+	
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	
+	// Build prompt for Claude - extract user content
+	var userContent string
+	for _, msg := range req.Messages {
+		if msg.Role == "user" {
+			userContent = msg.Content
+		}
+	}
+	
+	// Always use Azure OpenAI
+	var responseContent string
+	// Try different deployments based on request needs
+	deployment := os.Getenv("AZURE_OPENAI_DEPLOYMENT")
+	if deployment == "" {
+		// Default to gpt-4.1 for best quality
+		deployment = "gpt-4.1"
+	}
+	
+	// For faster responses, use gpt-4.1-mini or gpt-35-turbo
+	if req.MaxTokens > 0 && req.MaxTokens < 500 {
+		deployment = "gpt-4.1-mini" // Faster for smaller responses
+	}
+	
+	responseContent = callAzureOpenAIWithDeployment(req.Messages, req.MaxTokens, deployment)
+	
+	// Return workflow-compatible response (simple format with content field)
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"content": responseContent,
+		"usage": map[string]interface{}{
+			"prompt_tokens":     len(userContent) / 4,
+			"completion_tokens": len(responseContent) / 4,
+			"total_tokens":      (len(userContent) + len(responseContent)) / 4,
+		},
+		"model":    deployment,
+		"provider": "azure",
+	}
+	
+	json.NewEncoder(w).Encode(response)
+}
+
 func callBedrock(prompt string, maxTokens int) string {
 	if maxTokens == 0 {
 		maxTokens = 1000
 	}
 	
-	// Prepare Claude request
+	// Prepare Claude request (old completion API for backward compatibility)
 	claudeReq := map[string]interface{}{
 		"prompt":               prompt,
 		"max_tokens_to_sample": maxTokens,
@@ -229,7 +301,7 @@ func callBedrock(prompt string, maxTokens int) string {
 	}
 	
 	// Call Bedrock
-	model := getEnv("AWS_BEDROCK_MODEL", "anthropic.claude-3-haiku-20240307-v1:0")
+	model := getEnv("AWS_BEDROCK_MODEL", "anthropic.claude-instant-v1")
 	output, err := bedrockClient.InvokeModel(context.TODO(), &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(model),
 		ContentType: aws.String("application/json"),
@@ -254,4 +326,149 @@ func callBedrock(prompt string, maxTokens int) string {
 	}
 	
 	return "Error: Unexpected response format"
+}
+
+// callBedrockMessages uses the Messages API for Claude 3 models
+func callBedrockMessages(userContent string, maxTokens int) string {
+	if maxTokens == 0 {
+		maxTokens = 1000
+	}
+	
+	// Use Messages API format for Claude 3
+	claudeReq := map[string]interface{}{
+		"anthropic_version": "bedrock-2023-05-31",
+		"messages": []map[string]string{
+			{
+				"role": "user",
+				"content": userContent,
+			},
+		},
+		"max_tokens": maxTokens,
+		"temperature": 0.7,
+	}
+	
+	reqBody, err := json.Marshal(claudeReq)
+	if err != nil {
+		logger.Error("Failed to marshal request", zap.Error(err))
+		return "Error: Failed to prepare request"
+	}
+	
+	// Call Bedrock with Claude 3 Haiku
+	model := getEnv("AWS_BEDROCK_MODEL", "anthropic.claude-3-haiku-20240307-v1:0")
+	output, err := bedrockClient.InvokeModel(context.TODO(), &bedrockruntime.InvokeModelInput{
+		ModelId:     aws.String(model),
+		ContentType: aws.String("application/json"),
+		Accept:      aws.String("application/json"),
+		Body:        reqBody,
+	})
+	
+	if err != nil {
+		logger.Error("Bedrock API call failed", zap.Error(err))
+		return fmt.Sprintf("Error: %v", err)
+	}
+	
+	// Parse Messages API response
+	var resp map[string]interface{}
+	if err := json.Unmarshal(output.Body, &resp); err != nil {
+		logger.Error("Failed to parse Bedrock response", zap.Error(err))
+		return "Error: Failed to parse response"
+	}
+	
+	// Messages API returns content as array
+	if content, ok := resp["content"].([]interface{}); ok && len(content) > 0 {
+		if textBlock, ok := content[0].(map[string]interface{}); ok {
+			if text, ok := textBlock["text"].(string); ok {
+				return text
+			}
+		}
+	}
+	
+	logger.Error("Unexpected response format", zap.Any("response", resp))
+	return "Error: Unexpected response format"
+}
+
+// callAzureOpenAIWithDeployment calls Azure OpenAI API with specific deployment
+func callAzureOpenAIWithDeployment(messages []struct{Role string `json:"role"`; Content string `json:"content"`}, maxTokens int, deployment string) string {
+	endpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
+	apiKey := os.Getenv("AZURE_OPENAI_KEY")
+	
+	if endpoint == "" || apiKey == "" {
+		logger.Error("Azure OpenAI credentials not configured")
+		return "Error: Azure OpenAI not configured"
+	}
+	
+	if maxTokens == 0 {
+		maxTokens = 1000
+	}
+	
+	// Build request URL
+	url := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=2023-05-15", endpoint, deployment)
+	
+	// Prepare request body
+	requestBody := map[string]interface{}{
+		"messages": messages,
+		"max_tokens": maxTokens,
+		"temperature": 0.7,
+	}
+	
+	reqBody, err := json.Marshal(requestBody)
+	if err != nil {
+		logger.Error("Failed to marshal Azure request", zap.Error(err))
+		return "Error: Failed to prepare Azure request"
+	}
+	
+	// Create HTTP request
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		logger.Error("Failed to create Azure request", zap.Error(err))
+		return "Error: Failed to create Azure request"
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", apiKey)
+	
+	// Execute request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Error("Azure OpenAI API call failed", zap.Error(err))
+		return fmt.Sprintf("Error: Azure API call failed: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Error("Failed to read Azure response", zap.Error(err))
+		return "Error: Failed to read Azure response"
+	}
+	
+	// Parse response
+	var azureResp map[string]interface{}
+	if err := json.Unmarshal(body, &azureResp); err != nil {
+		logger.Error("Failed to parse Azure response", zap.Error(err))
+		return "Error: Failed to parse Azure response"
+	}
+	
+	// Extract content from response
+	if choices, ok := azureResp["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if message, ok := choice["message"].(map[string]interface{}); ok {
+				if content, ok := message["content"].(string); ok {
+					return content
+				}
+			}
+		}
+	}
+	
+	// Check for error in response
+	if errorInfo, ok := azureResp["error"].(map[string]interface{}); ok {
+		if msg, ok := errorInfo["message"].(string); ok {
+			logger.Error("Azure API error", zap.String("error", msg))
+			return fmt.Sprintf("Error: Azure API: %s", msg)
+		}
+	}
+	
+	logger.Error("Unexpected Azure response format", zap.Any("response", azureResp))
+	return "Error: Unexpected Azure response format"
 }

@@ -155,10 +155,22 @@ func ValidateSemanticActivity(ctx context.Context, request SemanticValidationReq
 		valid = false
 		for _, err := range errors {
 			if errMap, ok := err.(map[string]interface{}); ok {
+				// Safely extract message
+				message := "Unknown error"
+				if msg, ok := errMap["message"].(string); ok {
+					message = msg
+				}
+				
+				// Safely extract line number
+				line := 0
+				if lineNum, ok := errMap["line"].(float64); ok {
+					line = int(lineNum)
+				}
+				
 				issues = append(issues, types.Issue{
 					Type:    "error",
-					Message: errMap["message"].(string),
-					Line:    int(errMap["line"].(float64)),
+					Message: message,
+					Line:    line,
 				})
 			}
 		}

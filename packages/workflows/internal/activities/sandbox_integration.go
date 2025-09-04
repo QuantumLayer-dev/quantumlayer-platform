@@ -144,17 +144,19 @@ func BuildCapsuleActivity(ctx context.Context, request CapsuleBuilderRequest) (*
 	}
 
 	// Store as QuantumDrop
+	dropContent, _ := json.Marshal(map[string]interface{}{
+		"capsule_id": result.ID,
+		"name":       result.Name,
+		"structure":  result.Structure,
+		"metadata":   result.Metadata,
+	})
+	
 	drop := types.QuantumDrop{
 		WorkflowID: request.WorkflowID,
 		Stage:      "capsule_building",
 		Type:       "capsule",
-		Content: map[string]interface{}{
-			"capsule_id": result.ID,
-			"name":       result.Name,
-			"structure":  result.Structure,
-			"metadata":   result.Metadata,
-		},
-		Timestamp: time.Now(),
+		Artifact:   string(dropContent),
+		Timestamp:  time.Now(),
 	}
 
 	if err := StoreQuantumDropActivity(ctx, drop); err != nil {
@@ -179,7 +181,7 @@ func ValidateWithSandboxActivity(ctx context.Context, code string, language stri
 	if err != nil {
 		return &types.ValidationResult{
 			Valid:  false,
-			Errors: []string{fmt.Sprintf("Sandbox execution failed: %v", err)},
+			Issues: []types.Issue{{Type: "error", Message: fmt.Sprintf("Sandbox execution failed: %v", err)}},
 			Score:  0,
 		}, nil
 	}
@@ -187,36 +189,37 @@ func ValidateWithSandboxActivity(ctx context.Context, code string, language stri
 	// Analyze execution result
 	validationResult := &types.ValidationResult{
 		Valid:    execResult.Success && execResult.ExitCode == 0,
-		Errors:   []string{},
-		Warnings: []string{},
+		Issues:   []types.Issue{},
 		Score:    100,
 	}
 
 	if !execResult.Success {
-		validationResult.Errors = append(validationResult.Errors, execResult.Errors)
+		validationResult.Issues = append(validationResult.Issues, types.Issue{Type: "error", Message: execResult.Errors})
 		validationResult.Score = 0
 	}
 
 	if execResult.Errors != "" {
-		validationResult.Errors = append(validationResult.Errors, execResult.Errors)
+		validationResult.Issues = append(validationResult.Issues, types.Issue{Type: "error", Message: execResult.Errors})
 		validationResult.Score = 50
 	}
 
 	// Store validation drop
+	validationContent, _ := json.Marshal(map[string]interface{}{
+		"execution_id": execResult.ID,
+		"success":      execResult.Success,
+		"output":       execResult.Output,
+		"errors":       execResult.Errors,
+		"exit_code":    execResult.ExitCode,
+		"duration":     execResult.Duration,
+		"score":        validationResult.Score,
+	})
+	
 	drop := types.QuantumDrop{
 		WorkflowID: workflowID,
 		Stage:      "sandbox_validation",
 		Type:       "validation",
-		Content: map[string]interface{}{
-			"execution_id": execResult.ID,
-			"success":      execResult.Success,
-			"output":       execResult.Output,
-			"errors":       execResult.Errors,
-			"exit_code":    execResult.ExitCode,
-			"duration":     execResult.Duration,
-			"score":        validationResult.Score,
-		},
-		Timestamp: time.Now(),
+		Artifact:   string(validationContent),
+		Timestamp:  time.Now(),
 	}
 
 	if err := StoreQuantumDropActivity(ctx, drop); err != nil {

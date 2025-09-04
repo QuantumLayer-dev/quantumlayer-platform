@@ -57,7 +57,7 @@ export default function PreviewPage() {
   const loadCapsuleData = async () => {
     try {
       // First get the QuantumDrops
-      const dropsResponse = await fetch(`/api/drops/v1/workflows/${workflowId}/drops`)
+      const dropsResponse = await fetch(`/api/capsules/${workflowId}/drops`)
       const dropsData = await dropsResponse.json()
       
       // Find the code drop
