@@ -1,0 +1,310 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: packer-system
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: packer-templates
+  namespace: packer-system
+data:
+  ubuntu-base.pkr.hcl: |
+    packer {
+      required_plugins {
+        docker = {
+          version = ">= 1.0.0"
+          source  = "github.com/hashicorp/docker"
+        }
+      }
+    }
+
+    source "docker" "ubuntu" {
+      image  = "ubuntu:22.04"
+      commit = true
+      changes = [
+        "ENTRYPOINT [\"/bin/bash\"]",
+        "USER root",
+        "WORKDIR /"
+      ]
+    }
+
+    build {
+      name = "ubuntu-golden"
+      sources = ["source.docker.ubuntu"]
+
+      provisioner "shell" {
+        inline = [
+          "apt-get update",
+          "apt-get install -y curl wget vim net-tools",
+          "apt-get install -y openssl ca-certificates",
+          "apt-get clean",
+          "rm -rf /var/lib/apt/lists/*"
+        ]
+      }
+
+      provisioner "shell" {
+        inline = [
+          "# CIS Hardening",
+          "echo 'kernel.randomize_va_space = 2' >> /etc/sysctl.conf",
+          "echo 'net.ipv4.conf.all.accept_source_route = 0' >> /etc/sysctl.conf",
+          "echo 'net.ipv4.conf.default.accept_source_route = 0' >> /etc/sysctl.conf",
+          "echo 'net.ipv4.icmp_echo_ignore_broadcasts = 1' >> /etc/sysctl.conf"
+        ]
+      }
+
+      post-processor "docker-tag" {
+        repository = "docker-registry.image-registry.svc.cluster.local:5000/golden-images/ubuntu"
+        tags       = ["22.04-hardened", "latest"]
+      }
+    }
+
+  rhel-base.pkr.hcl: |
+    source "docker" "rhel" {
+      image  = "registry.access.redhat.com/ubi9/ubi:latest"
+      commit = true
+    }
+
+    build {
+      name = "rhel-golden"
+      sources = ["source.docker.rhel"]
+
+      provisioner "shell" {
+        inline = [
+          "dnf update -y",
+          "dnf install -y curl wget vim net-tools",
+          "dnf clean all"
+        ]
+      }
+
+      provisioner "shell" {
+        inline = [
+          "# STIG Hardening",
+          "echo 'umask 077' >> /etc/profile",
+          "echo 'readonly TMOUT=900' >> /etc/profile",
+          "chmod 644 /etc/passwd",
+          "chmod 000 /etc/shadow"
+        ]
+      }
+
+      post-processor "docker-tag" {
+        repository = "docker-registry.image-registry.svc.cluster.local:5000/golden-images/rhel"
+        tags       = ["9-hardened", "latest"]
+      }
+    }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: packer-builder
+  namespace: packer-system
+spec:
+  type: ClusterIP
+  selector:
+    app: packer-builder
+  ports:
+  - port: 8097
+    targetPort: 8097
+    protocol: TCP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: packer-external
+  namespace: packer-system
+spec:
+  type: NodePort
+  selector:
+    app: packer-builder
+  ports:
+  - port: 8097
+    targetPort: 8097
+    nodePort: 30100
+    protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: packer-builder
+  namespace: packer-system
+spec:
+  serviceName: packer-builder
+  replicas: 1
+  selector:
+    matchLabels:
+      app: packer-builder
+  template:
+    metadata:
+      labels:
+        app: packer-builder
+    spec:
+      serviceAccountName: packer-builder
+      containers:
+      - name: packer-builder
+        image: hashicorp/packer:1.10
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Install Docker client
+          apk add --no-cache docker-cli curl jq
+          
+          # Start Packer API server
+          echo "Starting Packer build service..."
+          
+          # Create build handler script
+          cat > /usr/local/bin/build-handler.sh << 'SCRIPT'
+          #!/bin/sh
+          while true; do
+            echo "Packer builder ready on port 8097"
+            # Simple HTTP server to receive build requests
+            nc -l -p 8097 -e /usr/local/bin/process-build.sh
+          done
+          SCRIPT
+          
+          cat > /usr/local/bin/process-build.sh << 'PROCESS'
+          #!/bin/sh
+          read request
+          
+          if echo "$request" | grep -q "POST /build"; then
+            # Read body
+            while read line; do
+              [ -z "$line" ] && break
+            done
+            read -n $CONTENT_LENGTH body
+            
+            # Extract template name
+            template=$(echo "$body" | jq -r '.template')
+            
+            # Run packer build
+            cd /templates
+            packer init ${template}.pkr.hcl
+            packer build ${template}.pkr.hcl
+            
+            echo "HTTP/1.1 200 OK"
+            echo "Content-Type: application/json"
+            echo ""
+            echo '{"status":"completed","template":"'$template'"}'
+          else
+            echo "HTTP/1.1 200 OK"
+            echo "Content-Type: application/json"
+            echo ""
+            echo '{"status":"healthy","service":"packer-builder"}'
+          fi
+          PROCESS
+          
+          chmod +x /usr/local/bin/*.sh
+          exec /usr/local/bin/build-handler.sh
+        ports:
+        - containerPort: 8097
+        env:
+        - name: DOCKER_HOST
+          value: tcp://docker-in-docker:2375
+        - name: PACKER_LOG
+          value: "1"
+        volumeMounts:
+        - name: packer-templates
+          mountPath: /templates
+        - name: workspace
+          mountPath: /workspace
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      
+      - name: docker-in-docker
+        image: docker:24-dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        volumeMounts:
+        - name: docker-storage
+          mountPath: /var/lib/docker
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+      
+      volumes:
+      - name: packer-templates
+        configMap:
+          name: packer-templates
+      - name: workspace
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: docker-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: packer-builder
+  namespace: packer-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: packer-builder
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get", "list", "create", "update"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: packer-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: packer-builder
+subjects:
+- kind: ServiceAccount
+  name: packer-builder
+  namespace: packer-system
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: packer-init
+  namespace: packer-system
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init
+        image: alpine:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Packer system initialized"
+          echo "Templates available:"
+          echo "- ubuntu-base"
+          echo "- rhel-base"
+          echo "Ready to build golden images!"

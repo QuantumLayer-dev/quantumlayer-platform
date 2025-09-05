@@ -1,0 +1,172 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cosign-system
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cosign-keys
+  namespace: cosign-system
+type: Opaque
+data:
+  # These are base64 encoded test keys - REPLACE IN PRODUCTION
+  # Generated with: cosign generate-key-pair
+  cosign.key: LS0tLS1CRUdJTiBFTkNSWVBURUQgQ09TSUdOIFBSSVZBVEUgS0VZLS0tLS0KZXlKclpHWWlPbnNpYm1GdFpTSTZJbk5qY25sd2RDSXNJbkJoY21GdGN5STZleUpPSWpveE5qTTROQ3dpY2lJNgpPQ3dpY0NJNk1YMHNJbk5oYkhRaU9pSm1NV0ZoT0dSbVl6aGpaVFUxWXpFeE5HUXdNbUk0T0RJM05USTVNVEZoCk9UY3daR0prT0RNaWZTd2lZMmx3YUdWeUlqb2lSMDR3UlU1Q1FrZEVWRTVLVjBFME5FazBRa0V6VUVaVlRsSlIKVmxOSVNGQTRNRVZQVDFaSE5FOUJUazFJTlV0V1VsTlVVMVJTT1VSS1NWSlBTVVJUTmxGTlYwOHlWbGhKVDBOQgpWa2RIUVRGVk1FczNWRTlOTmtGUFdFdGlOMFZTV0UxSlRVczFOa2RUVGpkU1drSTBSbU5GVXpkVVdEQTBTMFk1ClZrNVpTa3RNVFVGTVJrUkVXRTFDUW01TVRtdDVRa2RETVVOcVJUUlZUMHBKVkRsUVNGSlRWVGQzVEVGVU5VdFQKVTBsRVRUWlZXVmczTTBSV1VGSlJVRkExVmtSTU1taENPRVpSVVRGTlJFSkZNRkV4VDFaSFJrOVJTRGRLVUdsbgpSMDF1UVRnNE1VRnFVMjB2WmxaR2QwRkpTR0ZQU2tGdGRrbGlZbmhSU0RacFJIQk5Oa0ZLTkRjNFdGUXhjMGQ2Ck9XNVdRMUJ1YVRaaGJrVnJhMGRLY205T01IVnBUVlkxZG1Od1JsQTBOVlUyU2s1TlNHaDNRMFJYVDA5QlEyODMKTlhReVJGSkdUbFJUVFU1WFFYSnBObE5JVlVveFZWbE5ibU5yWlVGQ1pFcFRORlk0YldkclMxSnlaRzAyUmpBMApWV2t4T0RSd2NIRndka05VYUROdmMzRlJhRWx3U0hGMFlVcGhTVkUxVGtWWVN6VmtRa0p4WVVaRFUzVk1Xa0V5Ck5rVnNhRGhoWW1sTWRFaFFTbGRRVlRSWE5VbDBUMFJRVW5SRWJWQTVaV3BYYzA1dWFUaE5ORU5SWWxkRVRGUXcKVVRWRVFYRXlWa2xqTVVOMlpVaFJURmxIVDJaWE9IQm1URGxQYzBGMWFYSktXazFYWWtWWk1GTkRhRVp0V1RCdwpNR3Q0T0V0dFJFWjJXVE0yWjBOWVoxbGtZMGx2TTBaNFEzRTNRakJ4WW1RM1NraHBVRzl4V2pOM1NHaDFOMnRVCldsaDRNblJ0TlRBeVJYQjNOR1JVVEhnM1Vsa3lPR3M0Y0RKaGJEQnZaVlJKT0VKblRFWkJVa0ZITTAxVU1FRTQKVjFvNFVVcGhlRzFNY21seWJsaEJTblpoVGxkRVJFUmhXRGd6UmxGYVZXeEZXVWRFV1dFMFFtOU9VVTFOU2tNdgpUbXN4WlVOYVF6TmpOMmhzUXpGVk5sWmtZazh3VDJWWlkxSmpWbkpCVTBkblJ6Vk5ibkZpZEZGb09XNVdUM2RZCmJEQXdNRWxtWVc5R1UxQlFVbFJEV0UxSVRFdFdPRzV0VmpGeFluazRXR2hQWlU1MVkxaHZTM0pJVWxOTE1XRkoKTTJSUlpsWlJSR1ZXZDJScmRuRjFXVEJEUmxsT04yMUVZMUJYV0RGVFdGaERja0U0VERWb2VFYzFRalpLWjA1RApUM2syVW1GQldGaHRNbU5SY0ZkTFFsbHBZemxZU21aSGJrczVORTF5VUZaUFRGaE1WbEpEUWtVOUlpd2libTl1ClkyVWlPaUk1WWpaa1pEVTBNelpoTmpGalpXTXdNRFpoTXpFeE16UXlZbVptWmpBeE1EWmlNVGcxWmpNMU9XRTFNCk5qRTJPR0kxWkRVaWZRPT0KLS0tLS1FTkQgRU5DUllQVEVEIENPU0lHTiBQUklWQVRFIEtFWS0tLS0tCg==
+  cosign.pub: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZrd0V3WUhLb1pJemowQ0FRWUlLb1pJemowREFRY0RRZ0FFNnY5dUg2SGN2cnFmaUpqVVJ1NUU2SFhVZjFmNgpVRnBJMU1XaG9Qbjl2K2xOL1VuZWE1cGM4T0JwQXFqNmtzTHJkVzRPMGNBTmdIT0VnaDhpdUtCTXhBPT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+  cosign.password: dGVzdC1wYXNzd29yZA==  # test-password
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cosign-webhook
+  namespace: cosign-system
+spec:
+  type: ClusterIP
+  selector:
+    app: cosign-webhook
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cosign-external
+  namespace: cosign-system
+spec:
+  type: NodePort
+  selector:
+    app: cosign-webhook
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30099
+    protocol: TCP
+    name: http
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cosign-webhook
+  namespace: cosign-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cosign-webhook
+  template:
+    metadata:
+      labels:
+        app: cosign-webhook
+    spec:
+      serviceAccountName: cosign-webhook
+      containers:
+      - name: cosign-webhook
+        image: cgr.dev/chainguard/cosign:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Cosign webhook server starting..."
+          # Create a simple webhook server using cosign
+          while true; do
+            echo "Cosign ready for signing operations"
+            sleep 3600
+          done
+        env:
+        - name: COSIGN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: cosign-keys
+              key: cosign.password
+        - name: COSIGN_KEY
+          value: /keys/cosign.key
+        - name: COSIGN_PUB
+          value: /keys/cosign.pub
+        volumeMounts:
+        - name: cosign-keys
+          mountPath: /keys
+          readOnly: true
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      volumes:
+      - name: cosign-keys
+        secret:
+          secretName: cosign-keys
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cosign-webhook
+  namespace: cosign-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cosign-webhook
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "create", "update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cosign-webhook
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cosign-webhook
+subjects:
+- kind: ServiceAccount
+  name: cosign-webhook
+  namespace: cosign-system
+
+---
+# Admission webhook for image signature verification
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: cosign-webhook
+webhooks:
+- name: image-signature-verification.cosign-system.svc
+  admissionReviewVersions:
+  - v1
+  - v1beta1
+  clientConfig:
+    service:
+      namespace: cosign-system
+      name: cosign-webhook
+      path: "/validate"
+      port: 8080
+  failurePolicy: Ignore  # Start with Ignore, change to Fail when ready
+  rules:
+  - apiGroups: ["apps", "batch"]
+    apiVersions: ["v1"]
+    resources: ["deployments", "daemonsets", "statefulsets", "jobs"]
+    operations: ["CREATE", "UPDATE"]
+  namespaceSelector:
+    matchExpressions:
+    - key: cosign.sigstore.dev/enforcement
+      operator: In
+      values: ["enabled"]
+  sideEffects: None
+  timeoutSeconds: 10

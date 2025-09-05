@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -31,7 +30,7 @@ type DriftPrediction struct {
 	Platform        string    `json:"platform"`
 	PredictedDrift  bool      `json:"predicted_drift"`
 	Probability     float64   `json:"probability"`
-	TimeToD drift    string    `json:"time_to_drift"`
+	TimeToDrift     string    `json:"time_to_drift"`
 	RiskLevel       string    `json:"risk_level"`
 	Factors         []Factor  `json:"factors"`
 	Recommendation  string    `json:"recommendation"`
@@ -276,7 +275,7 @@ func (ai *QInfraAI) performDriftPrediction(nodeID, platform string, state map[st
 		Platform:       platform,
 		PredictedDrift: probability > 0.5,
 		Probability:    probability,
-		TimeToD drift:   timeToDrift,
+		TimeToDrift:    timeToDrift,
 		RiskLevel:      riskLevel,
 		Factors:        factors,
 		Recommendation: recommendation,

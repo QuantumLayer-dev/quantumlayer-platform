@@ -12,7 +12,7 @@ COPY . .
 # Download dependencies and build
 RUN go mod download && \
     go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux go build -o image-registry main.go
+    CGO_ENABLED=0 GOOS=linux go build -o image-registry .
 
 # Final stage
 FROM alpine:latest
