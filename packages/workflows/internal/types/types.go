@@ -160,6 +160,7 @@ type ExtendedGenerationResult struct {
 	Metrics            GenerationMetrics   `json:"metrics"`
 	Errors             []string            `json:"errors,omitempty"`
 	CompletedAt        time.Time           `json:"completedAt"`
+	PreviewURL         string              `json:"previewUrl,omitempty"`
 }
 
 // ValidationResults aggregates all validation scores

@@ -6,11 +6,9 @@ RUN apk add --no-cache git gcc g++ musl-dev
 WORKDIR /app
 
 # Copy all required files
-COPY packages/parser/ ./
-COPY packages/shared/ ./shared/
+COPY . ./
 
-# Fix module replacement if needed
-RUN if [ -f go.mod ]; then go mod edit -replace github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared=./shared || true; fi
+# No need for module replacement since we have all files
 
 # Download dependencies and tidy
 RUN go mod tidy && go mod download

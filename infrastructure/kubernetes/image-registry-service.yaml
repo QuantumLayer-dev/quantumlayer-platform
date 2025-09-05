@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-registry
+  namespace: quantumlayer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-registry
+  template:
+    metadata:
+      labels:
+        app: image-registry
+    spec:
+      imagePullSecrets:
+      - name: ghcr-secret
+      containers:
+      - name: image-registry
+        image: ghcr.io/quantumlayer-dev/image-registry:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8096
+          name: http
+        env:
+        - name: PORT
+          value: "8096"
+        - name: REGISTRY_URL
+          value: "http://docker-registry.image-registry.svc.cluster.local:5000"
+        - name: DATABASE_URL
+          value: "postgres://postgres:postgres@quantum-drops-db.quantumlayer.svc.cluster.local/quantumdrops"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "25m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8096
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8096
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-registry
+  namespace: quantumlayer
+spec:
+  selector:
+    app: image-registry
+  ports:
+  - port: 8096
+    targetPort: 8096
+    protocol: TCP
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-registry-external
+  namespace: quantumlayer
+spec:
+  selector:
+    app: image-registry
+  ports:
+  - port: 8096
+    targetPort: 8096
+    nodePort: 30096
+    protocol: TCP
+    name: http
+  type: NodePort
+---
+# ServiceMonitor for Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: image-registry
+  namespace: quantumlayer
+  labels:
+    app: image-registry
+spec:
+  selector:
+    matchLabels:
+      app: image-registry
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s

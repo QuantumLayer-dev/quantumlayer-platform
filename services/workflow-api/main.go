@@ -83,6 +83,10 @@ func main() {
 
 	// Get workflow result
 	r.GET("/api/v1/workflows/:id/result", handleGetWorkflowResult)
+	
+	// Infrastructure generation endpoints
+	r.POST("/api/v1/workflows/generate-infrastructure", handleGenerateInfrastructure)
+	r.GET("/api/v1/workflows/infrastructure/:id", handleGetInfrastructureStatus)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -230,4 +234,89 @@ func handleGetWorkflowResult(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// Infrastructure generation request
+type InfrastructureRequest struct {
+	WorkflowID         string   `json:"workflow_id"`          // Reference to code generation workflow
+	Provider           string   `json:"provider" binding:"required"` // aws, gcp, azure, kubernetes
+	Environment        string   `json:"environment"`           // dev, staging, production
+	Compliance         []string `json:"compliance"`            // SOC2, HIPAA, PCI-DSS, GDPR
+	EnableGoldenImages bool     `json:"enable_golden_images"`
+	EnableSOP          bool     `json:"enable_sop"`
+	AutoDeploy         bool     `json:"auto_deploy"`
+	DryRun             bool     `json:"dry_run"`
+}
+
+func handleGenerateInfrastructure(c *gin.Context) {
+	var req InfrastructureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate workflow ID
+	workflowID := fmt.Sprintf("infra-gen-%s", uuid.New().String())
+	if req.WorkflowID != "" {
+		workflowID = fmt.Sprintf("infra-for-%s", req.WorkflowID)
+	}
+
+	// Workflow options
+	options := client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: "infrastructure-generation",
+		WorkflowExecutionTimeout: 15 * time.Minute,
+	}
+
+	// Start infrastructure workflow
+	we, err := temporalClient.ExecuteWorkflow(
+		context.Background(),
+		options,
+		"InfrastructureGenerationWorkflow",
+		req,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to start infrastructure workflow",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, WorkflowResponse{
+		WorkflowID: we.GetID(),
+		RunID:      we.GetRunID(),
+		Status:     "started",
+		Message:    fmt.Sprintf("Infrastructure generation started for %s", req.Provider),
+	})
+}
+
+func handleGetInfrastructureStatus(c *gin.Context) {
+	workflowID := c.Param("id")
+
+	// Get workflow execution
+	ctx := context.Background()
+	resp, err := temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Infrastructure workflow not found"})
+		return
+	}
+
+	status := "unknown"
+	if resp.WorkflowExecutionInfo != nil {
+		if resp.WorkflowExecutionInfo.Status == 1 { // Running
+			status = "running"
+		} else if resp.WorkflowExecutionInfo.Status == 2 { // Completed
+			status = "completed"
+		} else if resp.WorkflowExecutionInfo.Status == 3 { // Failed
+			status = "failed"
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"workflow_id": workflowID,
+		"status":      status,
+		"start_time":  resp.WorkflowExecutionInfo.StartTime,
+		"close_time":  resp.WorkflowExecutionInfo.CloseTime,
+	})
 }

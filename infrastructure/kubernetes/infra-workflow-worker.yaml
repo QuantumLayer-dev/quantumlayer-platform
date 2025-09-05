@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infra-workflow-worker
+  namespace: temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infra-workflow-worker
+  template:
+    metadata:
+      labels:
+        app: infra-workflow-worker
+    spec:
+      imagePullSecrets:
+      - name: ghcr-secret
+      containers:
+      - name: infra-workflow-worker
+        image: ghcr.io/quantumlayer-dev/infra-workflow-worker:latest
+        imagePullPolicy: Always
+        env:
+        - name: TEMPORAL_HOST
+          value: "temporal-frontend:7233"
+        - name: TEMPORAL_NAMESPACE
+          value: "quantumlayer"
+        - name: TASK_QUEUE
+          value: "infrastructure-generation"
+        - name: QINFRA_URL
+          value: "http://qinfra.quantumlayer.svc.cluster.local:8095"
+        - name: QUANTUM_DROPS_URL
+          value: "http://quantum-drops.quantumlayer.svc.cluster.local:8090"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "pgrep infra-workflow-worker"
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "pgrep infra-workflow-worker"
+          initialDelaySeconds: 5
+          periodSeconds: 10

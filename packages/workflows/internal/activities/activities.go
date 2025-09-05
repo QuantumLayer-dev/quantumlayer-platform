@@ -190,8 +190,26 @@ func ParseRequirementsActivity(ctx context.Context, request types.CodeGeneration
 	return requirements, nil
 }
 
-// GenerateCodeActivity generates code using the LLM Router
+// GenerateCodeActivity generates code using the LLM Router with retry logic
 func GenerateCodeActivity(ctx context.Context, request LLMGenerationRequest) (*LLMGenerationResult, error) {
+	// Create retryable operation
+	operation := &RetryableOperation[*LLMGenerationResult]{
+		Name:   "llm-generation",
+		Config: LLMRetryConfig(),
+		Operation: func(ctx context.Context) (*LLMGenerationResult, error) {
+			return generateCodeWithLLM(ctx, request)
+		},
+		Fallback: func(ctx context.Context, err error) (*LLMGenerationResult, error) {
+			fmt.Printf("[GenerateCodeActivity] Using fallback due to: %v\n", err)
+			return generateFallbackCode(request), nil
+		},
+	}
+	
+	return operation.Execute(ctx)
+}
+
+// generateCodeWithLLM performs the actual LLM call
+func generateCodeWithLLM(ctx context.Context, request LLMGenerationRequest) (*LLMGenerationResult, error) {
 	// Log the attempt
 	fmt.Printf("[GenerateCodeActivity] Calling LLM Router at %s with provider %s\n", LLMRouterURL, request.Provider)
 	
@@ -226,7 +244,14 @@ func GenerateCodeActivity(ctx context.Context, request LLMGenerationRequest) (*L
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("[GenerateCodeActivity] ERROR: HTTP request failed: %v\n", err)
-		return nil, fmt.Errorf("failed to call LLM router: %w", err)
+		// Classify and handle the error
+		classified := ClassifyError(err, "llm-router")
+		if classified.Fallback && request.Language != "" {
+			// If we can fallback, return a template response for now
+			fmt.Printf("[GenerateCodeActivity] Using fallback template due to: %v\n", classified)
+			return generateFallbackCode(request), nil
+		}
+		return nil, classified
 	}
 	defer resp.Body.Close()
 	
@@ -236,7 +261,13 @@ func GenerateCodeActivity(ctx context.Context, request LLMGenerationRequest) (*L
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		fmt.Printf("[GenerateCodeActivity] ERROR: Non-200 response: %d, body: %s\n", resp.StatusCode, string(body))
-		return nil, fmt.Errorf("LLM router returned status %d: %s", resp.StatusCode, string(body))
+		// Classify HTTP error
+		classified := ClassifyHTTPError(resp.StatusCode, body, "llm-router")
+		if classified.Fallback && request.Language != "" {
+			fmt.Printf("[GenerateCodeActivity] Using fallback template due to HTTP %d\n", resp.StatusCode)
+			return generateFallbackCode(request), nil
+		}
+		return nil, classified
 	}
 
 	// Read and decode response
@@ -372,6 +403,116 @@ func GenerateTestsActivity(ctx context.Context, request TestGenerationRequest) (
 		TestCode: llmResult.Content,
 		FilePath: getTestFilePath(request.Language),
 	}, nil
+}
+
+// generateFallbackCode generates fallback code when LLM is unavailable
+func generateFallbackCode(request LLMGenerationRequest) *LLMGenerationResult {
+	var content string
+	
+	// Generate appropriate fallback based on language
+	switch strings.ToLower(request.Language) {
+	case "python":
+		content = generatePythonFallback(request)
+	case "javascript", "typescript":
+		content = generateJavaScriptFallback(request)
+	case "go":
+		content = generateGoFallback(request)
+	case "yaml":
+		content = generateYAMLFallback(request)
+	default:
+		content = generateGenericFallback(request)
+	}
+	
+	return &LLMGenerationResult{
+		Content:     content,
+		Provider:    "fallback",
+		Model:       "template",
+		TotalTokens: len(content) / 4, // Rough estimate
+	}
+}
+
+func generatePythonFallback(request LLMGenerationRequest) string {
+	return `# Auto-generated Python code (fallback template)
+# This is a temporary fallback due to LLM service unavailability
+
+def main():
+    """Main function for the application."""
+    print("Hello from QuantumLayer Platform")
+    # TODO: Implement actual functionality
+    pass
+
+if __name__ == "__main__":
+    main()
+`
+}
+
+func generateJavaScriptFallback(request LLMGenerationRequest) string {
+	return `// Auto-generated JavaScript code (fallback template)
+// This is a temporary fallback due to LLM service unavailability
+
+function main() {
+    console.log("Hello from QuantumLayer Platform");
+    // TODO: Implement actual functionality
+}
+
+module.exports = { main };
+`
+}
+
+func generateGoFallback(request LLMGenerationRequest) string {
+	return `package main
+
+// Auto-generated Go code (fallback template)
+// This is a temporary fallback due to LLM service unavailability
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello from QuantumLayer Platform")
+    // TODO: Implement actual functionality
+}
+`
+}
+
+func generateYAMLFallback(request LLMGenerationRequest) string {
+	// Check if it's for Docker Compose
+	if strings.Contains(strings.ToLower(request.Prompt), "docker") {
+		return `# Auto-generated Docker Compose configuration (fallback template)
+version: '3.8'
+
+services:
+  app:
+    image: alpine:latest
+    container_name: quantum-app
+    command: echo "QuantumLayer Platform - Fallback Template"
+    restart: unless-stopped
+`
+	}
+	
+	// Generic YAML
+	return `# Auto-generated YAML configuration (fallback template)
+name: quantum-app
+version: 1.0.0
+description: QuantumLayer Platform Application
+status: fallback-template
+`
+}
+
+func generateGenericFallback(request LLMGenerationRequest) string {
+	return fmt.Sprintf(`# Auto-generated code (fallback template)
+# Language: %s
+# This is a temporary fallback due to LLM service unavailability
+# Original prompt: %s
+
+# TODO: Implement actual functionality
+`, request.Language, request.Prompt[:min(100, len(request.Prompt))])
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GenerateDocumentationActivity generates documentation

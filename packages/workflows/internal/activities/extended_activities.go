@@ -116,10 +116,19 @@ type SemanticValidationResult struct {
 
 // ValidateSemanticActivity performs semantic validation using Parser service
 func ValidateSemanticActivity(ctx context.Context, request SemanticValidationRequest) (*SemanticValidationResult, error) {
+	// Detect the actual language/format of the content
+	detectedLanguage := DetectContentLanguage(request.Code, request.Type)
+	validationLanguage := request.Language
+	if detectedLanguage != "" {
+		validationLanguage = detectedLanguage
+		fmt.Printf("[ValidateSemanticActivity] Detected language: %s (was: %s) for type: %s\n", 
+			detectedLanguage, request.Language, request.Type)
+	}
+	
 	// Call Parser service for AST analysis
 	payload, _ := json.Marshal(map[string]string{
 		"code":     request.Code,
-		"language": request.Language,
+		"language": validationLanguage,
 	})
 
 	resp, err := http.Post(
@@ -690,6 +699,13 @@ func performBasicSemanticValidation(request SemanticValidationRequest) *Semantic
 	issues := []types.Issue{}
 	valid := true
 	
+	// Detect the actual language/format of the content for proper validation
+	detectedLanguage := DetectContentLanguage(request.Code, request.Type)
+	validationLanguage := request.Language
+	if detectedLanguage != "" {
+		validationLanguage = detectedLanguage
+	}
+	
 	// Basic checks
 	if len(request.Code) < 10 {
 		valid = false
@@ -700,7 +716,7 @@ func performBasicSemanticValidation(request SemanticValidationRequest) *Semantic
 	}
 	
 	// Language-specific basic checks
-	switch strings.ToLower(request.Language) {
+	switch strings.ToLower(validationLanguage) {
 	case "python":
 		if !strings.Contains(request.Code, "def ") && !strings.Contains(request.Code, "class ") {
 			issues = append(issues, types.Issue{
@@ -713,6 +729,66 @@ func performBasicSemanticValidation(request SemanticValidationRequest) *Semantic
 			issues = append(issues, types.Issue{
 				Type:    "warning",
 				Message: "No functions defined",
+			})
+		}
+	case "yaml", "yml":
+		// Validate YAML structure
+		if !strings.Contains(request.Code, ":") {
+			valid = false
+			issues = append(issues, types.Issue{
+				Type:    "error",
+				Message: "Invalid YAML: no key-value pairs found",
+			})
+		}
+		// Check for Docker Compose specific validation
+		if strings.Contains(strings.ToLower(request.Type), "docker") {
+			if !strings.Contains(request.Code, "services:") && !strings.Contains(request.Code, "services :") {
+				issues = append(issues, types.Issue{
+					Type:    "warning",
+					Message: "Docker Compose file should define services",
+				})
+			}
+		}
+	case "dockerfile":
+		if !strings.Contains(strings.ToLower(request.Code), "from ") {
+			valid = false
+			issues = append(issues, types.Issue{
+				Type:    "error",
+				Message: "Dockerfile must have a FROM instruction",
+			})
+		}
+	case "json":
+		// Basic JSON validation
+		trimmed := strings.TrimSpace(request.Code)
+		if !((strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+			 (strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]"))) {
+			valid = false
+			issues = append(issues, types.Issue{
+				Type:    "error",
+				Message: "Invalid JSON structure",
+			})
+		}
+	case "sql":
+		lower := strings.ToLower(request.Code)
+		if !strings.Contains(lower, "select") && !strings.Contains(lower, "create") && 
+		   !strings.Contains(lower, "insert") && !strings.Contains(lower, "update") {
+			issues = append(issues, types.Issue{
+				Type:    "warning",
+				Message: "No SQL statements found",
+			})
+		}
+	case "bash", "shell", "sh":
+		// Basic shell script validation
+		if strings.Contains(request.Code, "#!/") {
+			// Shebang is good
+			valid = true
+		}
+	case "hcl", "terraform":
+		if !strings.Contains(request.Code, "resource") && !strings.Contains(request.Code, "provider") &&
+		   !strings.Contains(request.Code, "variable") && !strings.Contains(request.Code, "module") {
+			issues = append(issues, types.Issue{
+				Type:    "warning",
+				Message: "No Terraform resources or providers defined",
 			})
 		}
 	}

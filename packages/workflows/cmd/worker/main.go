@@ -66,6 +66,10 @@ func main() {
 	w.RegisterActivity(activities.AnalyzePerformanceActivity)
 	w.RegisterActivity(activities.GenerateReadmeActivity)
 	w.RegisterActivity(activities.StoreQuantumDropActivity)
+	
+	// Register preview activities
+	w.RegisterActivity(activities.GeneratePreviewActivity)
+	w.RegisterActivity(activities.StorePreviewMetadataActivity)
 
 	logger.Info("Starting Temporal worker",
 		zap.String("taskQueue", workflows.CodeGenerationTaskQueue),

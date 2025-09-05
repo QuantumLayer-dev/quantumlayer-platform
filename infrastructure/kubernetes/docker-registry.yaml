@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-registry
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-storage
+  namespace: image-registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: registry-config
+  namespace: image-registry
+data:
+  config.yml: |
+    version: 0.1
+    log:
+      level: info
+      formatter: json
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+      delete:
+        enabled: true
+      maintenance:
+        uploadpurging:
+          enabled: true
+          age: 168h
+          interval: 24h
+          dryrun: false
+    http:
+      addr: :5000
+      headers:
+        X-Content-Type-Options: [nosniff]
+      debug:
+        addr: :5001
+        prometheus:
+          enabled: true
+          path: /metrics
+    health:
+      storagedriver:
+        enabled: true
+        interval: 10s
+        threshold: 3
+    auth:
+      htpasswd:
+        realm: QuantumLayer Registry
+        path: /auth/htpasswd
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-auth
+  namespace: image-registry
+type: Opaque
+stringData:
+  # Default credentials: admin/quantum2025
+  # Generated with: htpasswd -Bbn admin quantum2025
+  htpasswd: |
+    admin:$2y$05$S.M.ChP3N9Y8TqE5kL.xOu7hPtWPQgX0Q4QZT.LJGZ5nYHxLRKZGO
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-registry
+  namespace: image-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-registry
+  template:
+    metadata:
+      labels:
+        app: docker-registry
+    spec:
+      containers:
+      - name: registry
+        image: registry:2.8
+        ports:
+        - containerPort: 5000
+          name: registry
+        - containerPort: 5001
+          name: debug
+        volumeMounts:
+        - name: storage
+          mountPath: /var/lib/registry
+        - name: config
+          mountPath: /etc/docker/registry
+          readOnly: true
+        - name: auth
+          mountPath: /auth
+          readOnly: true
+        env:
+        - name: REGISTRY_STORAGE_DELETE_ENABLED
+          value: "true"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: registry-storage
+      - name: config
+        configMap:
+          name: registry-config
+      - name: auth
+        secret:
+          secretName: registry-auth
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-registry
+  namespace: image-registry
+  labels:
+    app: docker-registry
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5000
+    targetPort: 5000
+    name: registry
+  - port: 5001
+    targetPort: 5001
+    name: metrics
+  selector:
+    app: docker-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: image-registry
+spec:
+  type: NodePort
+  ports:
+  - port: 5000
+    targetPort: 5000
+    nodePort: 30500
+    name: registry
+  selector:
+    app: docker-registry
+---
+# ServiceMonitor for Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: docker-registry
+  namespace: image-registry
+  labels:
+    app: docker-registry
+spec:
+  selector:
+    matchLabels:
+      app: docker-registry
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
