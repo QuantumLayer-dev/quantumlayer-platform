@@ -14,6 +14,8 @@ import (
 const (
 	// Extended workflow name
 	ExtendedCodeGenerationWorkflowName = "ExtendedCodeGenerationWorkflow"
+	// Intelligent workflow name (v2)
+	IntelligentCodeGenerationWorkflowName = "IntelligentCodeGenerationWorkflow"
 	
 	// Extended workflow stages
 	StageFRDGeneration = "frd_generation"
@@ -56,6 +58,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	enhanceRequest := types.PromptEnhancementRequest{
 		OriginalPrompt: request.Prompt,
 		Type:           request.Type,
+		Language:       request.Language,
 		Context:        request.Context,
 		TargetProvider: getPreferredProvider(request.Preferences.Providers),
 	}
@@ -167,28 +170,76 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		}
 	}
 
-	// Stage 5: Generate code using LLM Router
-	logger.Info("Stage 5: Generating code")
-	generationRequest := activities.LLMGenerationRequest{
-		Prompt:   enhancedPrompt.EnhancedPrompt,
-		System:   enhancedPrompt.SystemPrompt,
-		Language: request.Language,
-		Provider: getPreferredProvider(request.Preferences.Providers),
-		MaxTokens: 4000,
+	// Stage 5: Intelligent multi-stage code generation
+	logger.Info("Stage 5: Intelligent code generation (multi-stage)")
+	intelligentRequest := activities.IntelligentCodeGenerationRequest{
+		ProjectName:   fmt.Sprintf("%s-%s", request.Type, request.Language),
+		Description:   enhancedPrompt.EnhancedPrompt,
+		Language:      request.Language,
+		Type:          request.Type,
+		Requirements:  requirements,
 	}
 	
-	var generatedCode activities.LLMGenerationResult
-	err = workflow.ExecuteActivity(ctx, activities.GenerateCodeActivity, generationRequest).Get(ctx, &generatedCode)
+	var intelligentCode activities.IntelligentCodeGenerationResult
+	// Set longer timeout for intelligent generation (6 LLM calls @ 30s each = 3 minutes)
+	intelligentCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 5 * time.Minute,
+	})
+	err = workflow.ExecuteActivity(intelligentCtx, activities.GenerateIntelligentCodeActivity, intelligentRequest).Get(ctx, &intelligentCode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate code: %w", err)
+		// Fallback to simple generation if intelligent generation fails
+		logger.Warn("Intelligent code generation failed, falling back to simple generation", "error", err)
+		
+		generationRequest := activities.LLMGenerationRequest{
+			Prompt:      enhancedPrompt.EnhancedPrompt,
+			System:      enhancedPrompt.SystemPrompt,
+			Language:    request.Language,
+			Provider:    getPreferredProvider(request.Preferences.Providers),
+			MaxTokens:   8000, // Increased for better results
+			// Lower temperature for deterministic enterprise code
+		}
+		
+		var generatedCode activities.LLMGenerationResult
+		err = workflow.ExecuteActivity(ctx, activities.GenerateCodeActivity, generationRequest).Get(ctx, &generatedCode)
+		if err != nil {
+			return nil, fmt.Errorf("both intelligent and simple code generation failed: %w", err)
+		}
+		
+		// Convert simple result to intelligent result format
+		intelligentCode = activities.IntelligentCodeGenerationResult{
+			Files: []types.GeneratedFile{
+				{
+					Path:     requirements.MainFilePath,
+					Content:  generatedCode.Content,
+					Language: request.Language,
+					Type:     "source",
+				},
+			},
+			MainFile:     requirements.MainFilePath,
+			Dependencies: []string{},
+		}
 	}
 	
-	// Create code QuantumDrop
+	// Create code QuantumDrop with main file content
+	mainFileContent := ""
+	if len(intelligentCode.Files) > 0 {
+		// Find the main file
+		for _, file := range intelligentCode.Files {
+			if file.Path == intelligentCode.MainFile || file.Type == "source" {
+				mainFileContent = file.Content
+				break
+			}
+		}
+		if mainFileContent == "" {
+			mainFileContent = intelligentCode.Files[0].Content // Fallback to first file
+		}
+	}
+	
 	drop = types.QuantumDrop{
 		ID:        fmt.Sprintf("drop-%s-code", request.ID),
 		Stage:     "code_generation",
 		Timestamp: workflow.Now(ctx),
-		Artifact:  generatedCode.Content,
+		Artifact:  mainFileContent,
 		Type:      "code",
 		WorkflowID: result.ID,
 	}
@@ -203,7 +254,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	// Stage 6: Semantic validation using Parser service
 	logger.Info("Stage 6: Semantic validation")
 	semanticRequest := activities.SemanticValidationRequest{
-		Code:     generatedCode.Content,
+		Code:     mainFileContent,
 		Language: request.Language,
 		Type:     request.Type,
 	}
@@ -220,7 +271,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		if !semanticResult.Valid && len(semanticResult.Issues) > 0 {
 			logger.Info("Stage 6.1: Applying feedback loop for code fixes")
 			feedbackRequest := activities.FeedbackLoopRequest{
-				Code:     generatedCode.Content,
+				Code:     mainFileContent,
 				Issues:   semanticResult.Issues,
 				Language: request.Language,
 			}
@@ -228,35 +279,51 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 			var fixedCode activities.FeedbackLoopResult
 			err = workflow.ExecuteActivity(ctx, activities.ApplyFeedbackLoopActivity, feedbackRequest).Get(ctx, &fixedCode)
 			if err == nil && fixedCode.ImprovedCode != "" {
-				generatedCode.Content = fixedCode.ImprovedCode
+				mainFileContent = fixedCode.ImprovedCode
 				result.FeedbackIterations = fixedCode.Iterations
+				
+				// Update the main file in intelligent code results
+				for i, file := range intelligentCode.Files {
+					if file.Path == intelligentCode.MainFile || file.Type == "source" {
+						intelligentCode.Files[i].Content = fixedCode.ImprovedCode
+						break
+					}
+				}
 			}
 		}
 	}
 
-	// Stage 7: Dependency resolution
+	// Stage 7: Dependency resolution (using intelligent code dependencies)
 	logger.Info("Stage 7: Resolving dependencies")
-	var dependencies activities.DependencyResolutionResult
-	depRequest := activities.DependencyResolutionRequest{
-		Code:     generatedCode.Content,
-		Language: request.Language,
-		Framework: request.Framework,
-	}
 	
-	err = workflow.ExecuteActivity(ctx, activities.ResolveDependenciesActivity, depRequest).Get(ctx, &dependencies)
-	if err != nil {
-		logger.Warn("Dependency resolution failed", "error", err)
+	// Use dependencies from intelligent generation if available
+	if len(intelligentCode.Dependencies) > 0 {
+		result.Dependencies = intelligentCode.Dependencies
+		logger.Info("Using dependencies from intelligent generation", "count", len(intelligentCode.Dependencies))
 	} else {
-		result.Dependencies = dependencies.Dependencies
+		// Fallback to traditional dependency resolution
+		var dependencies activities.DependencyResolutionResult
+		depRequest := activities.DependencyResolutionRequest{
+			Code:     mainFileContent,
+			Language: request.Language,
+			Framework: request.Framework,
+		}
 		
-		// Generate package file (package.json, requirements.txt, etc.)
-		if dependencies.PackageFile != "" {
-			result.Files = append(result.Files, types.GeneratedFile{
-				Path:     dependencies.PackageFileName,
-				Content:  dependencies.PackageFile,
-				Language: "json",
-				Type:     "config",
-			})
+		err = workflow.ExecuteActivity(ctx, activities.ResolveDependenciesActivity, depRequest).Get(ctx, &dependencies)
+		if err != nil {
+			logger.Warn("Dependency resolution failed", "error", err)
+		} else {
+			result.Dependencies = dependencies.Dependencies
+			
+			// Generate package file (package.json, requirements.txt, etc.)
+			if dependencies.PackageFile != "" {
+				result.Files = append(result.Files, types.GeneratedFile{
+					Path:     dependencies.PackageFileName,
+					Content:  dependencies.PackageFile,
+					Language: "json",
+					Type:     "config",
+				})
+			}
 		}
 	}
 
@@ -264,7 +331,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	logger.Info("Stage 8: Generating test plan")
 	var testPlan activities.TestPlanResult
 	testPlanRequest := activities.TestPlanRequest{
-		Code:     generatedCode.Content,
+		Code:     mainFileContent,
 		Language: request.Language,
 		Type:     request.Type,
 	}
@@ -303,7 +370,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	if request.Preferences.TestsRequired {
 		logger.Info("Stage 9: Generating tests")
 		testRequest := activities.TestGenerationRequest{
-			Code:     generatedCode.Content,
+			Code:     mainFileContent,
 			Language: request.Language,
 			Framework: requirements.TestFramework,
 		}
@@ -344,7 +411,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	logger.Info("Stage 10: Security scanning")
 	var securityScan activities.SecurityScanResult
 	securityRequest := activities.SecurityScanRequest{
-		Code:         generatedCode.Content,
+		Code:         mainFileContent,
 		Language:     request.Language,
 		Dependencies: result.Dependencies,
 	}
@@ -362,7 +429,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	logger.Info("Stage 11: Performance analysis")
 	var perfAnalysis activities.PerformanceAnalysisResult
 	perfRequest := activities.PerformanceAnalysisRequest{
-		Code:     generatedCode.Content,
+		Code:     mainFileContent,
 		Language: request.Language,
 		Type:     request.Type,
 	}
@@ -379,7 +446,7 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	logger.Info("Stage 12: Generating README and documentation")
 	var readme activities.ReadmeResult
 	readmeRequest := activities.ReadmeRequest{
-		Code:         generatedCode.Content,
+		Code:         mainFileContent,
 		Language:     request.Language,
 		Framework:    request.Framework,
 		Dependencies: result.Dependencies,
@@ -416,18 +483,47 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		}
 	}
 
-	// Final: Organize all files with proper structure
-	result.Code = generatedCode.Content
-	result.Files = append(result.Files, types.GeneratedFile{
-		Path:     requirements.MainFilePath,
-		Content:  generatedCode.Content,
-		Language: request.Language,
-		Type:     "source",
-	})
+	// Final: Organize all files with proper structure from intelligent generation
+	result.Code = mainFileContent
+	
+	// Add all intelligently generated files to result
+	for _, file := range intelligentCode.Files {
+		result.Files = append(result.Files, file)
+	}
+
+	// Store final files as a compiled drop for preview service
+	if len(result.Files) > 0 {
+		filesMap := make(map[string]interface{})
+		for _, file := range result.Files {
+			filesMap[file.Path] = map[string]interface{}{
+				"content":  file.Content,
+				"language": file.Language,
+				"type":     file.Type,
+			}
+		}
+		
+		filesJSON, _ := json.Marshal(filesMap)
+		
+		filesDrop := types.QuantumDrop{
+			ID:        fmt.Sprintf("drop-%s-files", request.ID),
+			Stage:     "files_compilation",
+			Timestamp: workflow.Now(ctx),
+			Artifact:  string(filesJSON),
+			Type:      "files",
+			WorkflowID: result.ID,
+		}
+		result.QuantumDrops = append(result.QuantumDrops, filesDrop)
+		
+		// Store the files QuantumDrop
+		err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, filesDrop).Get(ctx, nil)
+		if err != nil {
+			logger.Warn("Failed to store files QuantumDrop", "error", err)
+		}
+	}
 
 	// Calculate final metrics - Success if we generated content
 	// Don't fail workflows just because of validation warnings
-	contentGenerated := len(generatedCode.Content) > 100
+	contentGenerated := len(mainFileContent) > 100
 	hasNoErrors := true
 	
 	// Check for critical errors only (not warnings)
@@ -441,22 +537,28 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 	}
 	
 	// Success criteria: Content was generated and no critical errors
-	// Warnings and lower scores are acceptable for MVP
-	result.Success = contentGenerated && (hasNoErrors || result.ValidationResults.SecurityScore >= 50)
+	// Additional success boost if we have a live deployment
+	hasLiveDeployment := result.LiveURL != ""
+	result.Success = contentGenerated && (hasNoErrors || result.ValidationResults.SecurityScore >= 50) || hasLiveDeployment
 	result.CompletedAt = workflow.Now(ctx)
 	result.Metrics.Duration = result.CompletedAt.Sub(request.CreatedAt)
-	result.Metrics.LLMCalls = 5 // Base + FRD + Test Plan + Tests + README
-	result.Metrics.Provider = generatedCode.Provider
-	result.Metrics.Model = generatedCode.Model
-	result.Metrics.TotalTokens = generatedCode.TotalTokens
+	result.Metrics.LLMCalls = len(intelligentCode.Files) + 3 // Files + FRD + Test Plan + README
+	result.Metrics.Provider = getPreferredProvider(request.Preferences.Providers)
+	result.Metrics.Model = "intelligent-generation"
+	result.Metrics.TotalTokens = estimateTokensFromContent(mainFileContent)
 	result.Metrics.Cost = calculateCost(result.Metrics)
 
 	// Create final QuantumDrop summary
+	summaryArtifact := fmt.Sprintf("Workflow completed with %d artifacts", len(result.Files))
+	if result.LiveURL != "" {
+		summaryArtifact += fmt.Sprintf(". 🚀 Live at: %s", result.LiveURL)
+	}
+	
 	drop = types.QuantumDrop{
 		ID:        fmt.Sprintf("drop-%s-complete", request.ID),
 		Stage:     "completion",
 		Timestamp: workflow.Now(ctx),
-		Artifact:  fmt.Sprintf("Workflow completed with %d artifacts", len(result.Files)),
+		Artifact:  summaryArtifact,
 		Type:      "summary",
 		WorkflowID: result.ID,
 		Metadata: map[string]interface{}{
@@ -464,6 +566,9 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 			"validation_score": result.ValidationResults.SemanticValid,
 			"security_score": result.ValidationResults.SecurityScore,
 			"performance_score": result.ValidationResults.PerformanceScore,
+			"has_live_deployment": result.LiveURL != "",
+			"live_url": result.LiveURL,
+			"dashboard_url": result.DashboardURL,
 		},
 	}
 	result.QuantumDrops = append(result.QuantumDrops, drop)
@@ -474,8 +579,153 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		logger.Warn("Failed to store final QuantumDrop", "error", err)
 	}
 
-	// Stage 12: Generate Preview URL
-	logger.Info("Stage 12: Generating preview URL")
+	// Stage 13: Container Build and Registry Push
+	logger.Info("Stage 13: Building and pushing container image")
+	deploymentRequest := activities.DeploymentRequest{
+		WorkflowID:   result.ID,
+		CapsuleID:    result.RequestID,
+		Language:     request.Language,
+		Framework:    request.Framework,
+		Files:        convertFilesToMap(result.Files),
+		Dependencies: result.Dependencies,
+		Environment:  request.Context,
+		Resources: activities.ContainerResources{
+			CPU:    "200m",
+			Memory: "256Mi",
+		},
+		TTLMinutes: 60, // Default 1 hour
+	}
+	
+	var containerResult activities.ContainerBuildResult
+	// Extended timeout for container build (Docker build + push)
+	containerCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Minute,
+	})
+	err = workflow.ExecuteActivity(containerCtx, activities.BuildContainerImageActivity, deploymentRequest).Get(ctx, &containerResult)
+	if err != nil {
+		logger.Warn("Container build failed", "error", err)
+		// Continue without deployment but mark as partially successful
+	} else {
+		logger.Info("Container built successfully", "image", containerResult.ImageName+":"+containerResult.ImageTag)
+		
+		// Create container build QuantumDrop
+		drop := types.QuantumDrop{
+			ID:        fmt.Sprintf("drop-%s-container", request.ID),
+			Stage:     "container_build",
+			Timestamp: workflow.Now(ctx),
+			Artifact:  fmt.Sprintf("Container built: %s:%s (%.2fs)", containerResult.ImageName, containerResult.ImageTag, containerResult.BuildTime),
+			Type:      "container",
+			WorkflowID: result.ID,
+			Metadata: map[string]interface{}{
+				"image_name": containerResult.ImageName,
+				"image_tag":  containerResult.ImageTag,
+				"build_time": containerResult.BuildTime,
+				"image_size": containerResult.ImageSize,
+			},
+		}
+		result.QuantumDrops = append(result.QuantumDrops, drop)
+		
+		// Store the container QuantumDrop
+		err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
+		if err != nil {
+			logger.Warn("Failed to store container QuantumDrop", "error", err)
+		}
+	}
+
+	// Stage 14: Kubernetes Deployment
+	if containerResult.Success {
+		logger.Info("Stage 14: Deploying to Kubernetes")
+		
+		// Generate Kubernetes manifests
+		var k8sManifest string
+		err = workflow.ExecuteActivity(ctx, activities.GenerateK8sManifestsActivity, deploymentRequest, containerResult.ImageTag).Get(ctx, &k8sManifest)
+		if err != nil {
+			logger.Warn("K8s manifest generation failed", "error", err)
+		} else {
+			// Deploy to Kubernetes
+			var deployResult activities.KubernetesDeploymentResult
+			deployCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+				StartToCloseTimeout: 5 * time.Minute,
+			})
+			err = workflow.ExecuteActivity(deployCtx, activities.DeployToKubernetesActivity, deploymentRequest, k8sManifest, containerResult.ImageTag).Get(ctx, &deployResult)
+			if err != nil {
+				logger.Warn("Kubernetes deployment failed", "error", err)
+			} else {
+				logger.Info("Successfully deployed to Kubernetes", "live_url", deployResult.LiveURL)
+				
+				// Store deployment information in result
+				result.LiveURL = deployResult.LiveURL
+				result.DashboardURL = deployResult.DashboardURL
+				result.DeploymentID = deployResult.DeploymentID
+				result.ExpiresAt = &deployResult.ExpiresAt
+				
+				// Create deployment QuantumDrop
+				drop := types.QuantumDrop{
+					ID:        fmt.Sprintf("drop-%s-deployment", request.ID),
+					Stage:     "kubernetes_deployment",
+					Timestamp: workflow.Now(ctx),
+					Artifact:  fmt.Sprintf("Deployed: %s (expires: %s)", deployResult.LiveURL, deployResult.ExpiresAt.Format("2006-01-02 15:04:05")),
+					Type:      "deployment",
+					WorkflowID: result.ID,
+					Metadata: map[string]interface{}{
+						"live_url":      deployResult.LiveURL,
+						"dashboard_url": deployResult.DashboardURL,
+						"deployment_id": deployResult.DeploymentID,
+						"namespace":     deployResult.Namespace,
+						"expires_at":    deployResult.ExpiresAt,
+					},
+				}
+				result.QuantumDrops = append(result.QuantumDrops, drop)
+				
+				// Store the deployment QuantumDrop
+				err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
+				if err != nil {
+					logger.Warn("Failed to store deployment QuantumDrop", "error", err)
+				}
+			}
+		}
+	}
+
+	// Stage 15: Health Check and Live URL Verification
+	if result.LiveURL != "" {
+		logger.Info("Stage 15: Performing health check on live deployment")
+		
+		var healthOK bool
+		healthCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 5 * time.Minute, // Allow time for deployment to come up
+		})
+		err = workflow.ExecuteActivity(healthCtx, activities.HealthCheckActivity, result.LiveURL, 30).Get(ctx, &healthOK) // 30 attempts = 5 minutes
+		if err != nil {
+			logger.Warn("Health check failed", "error", err)
+		} else if healthOK {
+			logger.Info("Health check passed - application is live!", "url", result.LiveURL)
+			
+			// Create health check QuantumDrop
+			drop := types.QuantumDrop{
+				ID:        fmt.Sprintf("drop-%s-health", request.ID),
+				Stage:     "health_check",
+				Timestamp: workflow.Now(ctx),
+				Artifact:  fmt.Sprintf("✅ Application is live and healthy at %s", result.LiveURL),
+				Type:      "health",
+				WorkflowID: result.ID,
+				Metadata: map[string]interface{}{
+					"health_status": "healthy",
+					"live_url":      result.LiveURL,
+					"verified_at":   workflow.Now(ctx),
+				},
+			}
+			result.QuantumDrops = append(result.QuantumDrops, drop)
+			
+			// Store the health check QuantumDrop
+			err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
+			if err != nil {
+				logger.Warn("Failed to store health QuantumDrop", "error", err)
+			}
+		}
+	}
+
+	// Stage 16: Generate Preview URL (fallback for code preview)
+	logger.Info("Stage 16: Generating preview URL")
 	var previewResult activities.PreviewResult
 	capsuleID := "" // Set if we have a capsule ID
 	err = workflow.ExecuteActivity(ctx, activities.GeneratePreviewActivity, result.ID, capsuleID).Get(ctx, &previewResult)
@@ -499,7 +749,147 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		"success", result.Success,
 		"filesGenerated", len(result.Files),
 		"quantumDrops", len(result.QuantumDrops),
+		"duration", result.Metrics.Duration,
+		"liveURL", result.LiveURL,
+		"previewURL", result.PreviewURL)
+
+	return result, nil
+}
+
+// IntelligentCodeGenerationWorkflow is a deterministic workflow that always uses intelligent generation
+func IntelligentCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGenerationRequest) (*types.ExtendedGenerationResult, error) {
+	logger := workflow.GetLogger(ctx)
+	
+	// Set request timestamp if not set
+	if request.CreatedAt.IsZero() {
+		request.CreatedAt = workflow.Now(ctx)
+	}
+	
+	result := &types.ExtendedGenerationResult{
+		ID:           request.ID,
+		RequestID:    request.ID,
+		Files:        []types.GeneratedFile{},
+		QuantumDrops: []types.QuantumDrop{},
+		Metrics: types.GenerationMetrics{},
+	}
+
+	logger.Info("Starting intelligent code generation workflow",
+		"requestID", request.ID,
+		"language", request.Language,
+		"type", request.Type)
+
+	// Stage 1: Enhanced prompt generation
+	logger.Info("Stage 1: Enhanced prompt generation")
+	enhanceRequest := types.PromptEnhancementRequest{
+		OriginalPrompt: request.Prompt,
+		Language:       request.Language,
+		Type:           request.Type,
+		Context:        request.Context,
+		TargetProvider: getPreferredProvider(request.Preferences.Providers),
+	}
+	
+	var enhancedPrompt types.PromptEnhancementResult
+	// Set timeout for activities
+	activityCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 2 * time.Minute,
+	})
+	err := workflow.ExecuteActivity(activityCtx, activities.EnhancePromptActivity, enhanceRequest).Get(ctx, &enhancedPrompt)
+	if err != nil {
+		logger.Error("Enhanced prompt generation failed", "error", err)
+		return nil, fmt.Errorf("enhanced prompt generation failed: %w", err)
+	}
+
+	// Stage 2: Requirements parsing
+	logger.Info("Stage 2: Requirements parsing")
+	parseRequest := request // Use the request directly
+	parseRequest.Prompt = enhancedPrompt.EnhancedPrompt
+	
+	var requirements activities.ParsedRequirements
+	err = workflow.ExecuteActivity(activityCtx, activities.ParseRequirementsActivity, parseRequest).Get(ctx, &requirements)
+	if err != nil {
+		logger.Error("Requirements parsing failed", "error", err)
+		return nil, fmt.Errorf("requirements parsing failed: %w", err)
+	}
+
+	// Stage 3: Intelligent multi-stage code generation (ALWAYS)
+	logger.Info("Stage 3: Intelligent code generation (multi-stage)")
+	intelligentRequest := activities.IntelligentCodeGenerationRequest{
+		ProjectName:   fmt.Sprintf("%s-%s", request.Type, request.Language),
+		Description:   enhancedPrompt.EnhancedPrompt,
+		Language:      request.Language,
+		Type:          request.Type,
+		Requirements:  requirements,
+	}
+	
+	var intelligentCode activities.IntelligentCodeGenerationResult
+	// Set longer timeout for intelligent generation (6 LLM calls @ 30s each = 5 minutes)
+	intelligentCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 5 * time.Minute,
+	})
+	err = workflow.ExecuteActivity(intelligentCtx, activities.GenerateIntelligentCodeActivity, intelligentRequest).Get(ctx, &intelligentCode)
+	if err != nil {
+		logger.Error("Intelligent code generation failed", "error", err)
+		return nil, fmt.Errorf("intelligent code generation failed: %w", err)
+	}
+
+	// Create code QuantumDrop with all generated files
+	allFilesContent := ""
+	for _, file := range intelligentCode.Files {
+		allFilesContent += fmt.Sprintf("=== %s ===\n%s\n\n", file.Path, file.Content)
+	}
+	
+	drop := types.QuantumDrop{
+		ID:        fmt.Sprintf("drop-%s-intelligent-code", request.ID),
+		Stage:     "intelligent_code_generation",
+		Timestamp: workflow.Now(ctx),
+		Artifact:  allFilesContent,
+		Type:      "code",
+		Metadata: map[string]interface{}{
+			"files_count": len(intelligentCode.Files),
+			"main_file":   intelligentCode.MainFile,
+		},
+	}
+	result.QuantumDrops = append(result.QuantumDrops, drop)
+	result.Files = intelligentCode.Files
+
+	// Store QuantumDrop
+	err = workflow.ExecuteActivity(activityCtx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
+	if err != nil {
+		logger.Warn("Failed to store intelligent code QuantumDrop", "error", err)
+	}
+
+	// Success - intelligent generation completed
+	result.Success = len(intelligentCode.Files) > 0
+	result.CompletedAt = workflow.Now(ctx)
+	result.Metrics.Duration = result.CompletedAt.Sub(request.CreatedAt)
+	result.Metrics.LLMCalls = len(intelligentCode.Files)
+	result.Metrics.Provider = "intelligent-multi-stage"
+	result.Metrics.Model = "azure-gpt-4"
+	result.Metrics.TotalTokens = estimateTokensFromContent(allFilesContent)
+
+	logger.Info("Intelligent code generation workflow completed", 
+		"requestID", request.ID,
+		"success", result.Success,
+		"filesGenerated", len(result.Files),
 		"duration", result.Metrics.Duration)
 
 	return result, nil
+}
+
+// estimateTokensFromContent estimates the number of tokens in the given content
+// Using approximate 4 characters per token for English text
+func estimateTokensFromContent(content string) int {
+	if content == "" {
+		return 0
+	}
+	return len(content) / 4
+}
+
+// convertFilesToMap converts GeneratedFile slice to map[string]string for deployment activities
+func convertFilesToMap(files []types.GeneratedFile) map[string]string {
+	result := make(map[string]string)
+	for _, file := range files {
+		result[file.Path] = file.Content
+	}
+	return result
 }

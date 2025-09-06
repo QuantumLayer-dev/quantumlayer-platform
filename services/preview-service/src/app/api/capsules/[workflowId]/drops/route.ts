@@ -51,6 +51,27 @@ export async function GET(
 function transformDropsToFiles(drops: any[]) {
   const files: Record<string, { content: string; language: string }> = {};
   
+  // First check if there's a compiled "files" drop - this takes priority
+  const filesDrop = drops.find(drop => drop.type === 'files' && drop.stage === 'files_compilation');
+  if (filesDrop && filesDrop.artifact) {
+    try {
+      const compiledFiles = JSON.parse(filesDrop.artifact);
+      for (const [path, fileData] of Object.entries(compiledFiles as Record<string, any>)) {
+        files[path] = {
+          content: fileData.content || '',
+          language: fileData.language || getLanguageFromExtension(path.split('.').pop() || 'txt')
+        };
+      }
+      // If we have compiled files, return them directly
+      if (Object.keys(files).length > 0) {
+        return files;
+      }
+    } catch (e) {
+      console.warn('Failed to parse compiled files drop:', e);
+    }
+  }
+  
+  // Fallback to individual drops if no compiled files found
   for (const drop of drops) {
     let fileName = '';
     let language = 'plaintext';
@@ -90,7 +111,7 @@ function transformDropsToFiles(drops: any[]) {
         language = 'plaintext';
     }
     
-    // Handle structure type specifically
+    // Handle structure type specifically (fallback for old workflows)
     if (drop.type === 'structure' && drop.artifact) {
       try {
         // Try to parse as JSON structure

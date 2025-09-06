@@ -114,89 +114,39 @@ type SemanticValidationResult struct {
 	AST    string        `json:"ast,omitempty"`
 }
 
-// ValidateSemanticActivity performs semantic validation using Parser service
+// ValidateSemanticActivity performs semantic validation using enterprise quality validator
 func ValidateSemanticActivity(ctx context.Context, request SemanticValidationRequest) (*SemanticValidationResult, error) {
-	// Detect the actual language/format of the content
-	detectedLanguage := DetectContentLanguage(request.Code, request.Type)
-	validationLanguage := request.Language
-	if detectedLanguage != "" {
-		validationLanguage = detectedLanguage
-		fmt.Printf("[ValidateSemanticActivity] Detected language: %s (was: %s) for type: %s\n", 
-			detectedLanguage, request.Language, request.Type)
-	}
-	
-	// Call Parser service for AST analysis
-	payload, _ := json.Marshal(map[string]string{
-		"code":     request.Code,
-		"language": validationLanguage,
-	})
-
-	resp, err := http.Post(
-		fmt.Sprintf("%s/parse", ParserServiceURL),
-		"application/json",
-		bytes.NewBuffer(payload),
-	)
-	
+	// Use the new quality validator for enterprise-grade validation
+	validator := NewQualityValidator()
+	validationResult, err := validator.ValidateEnterpriseCode(ctx, request.Code, request.Language)
 	if err != nil {
-		fmt.Printf("[ValidateSemanticActivity] WARNING: Parser service unavailable: %v, using basic validation\n", err)
-		// For validation, we can use basic validation as it's not critical
-		return performBasicSemanticValidation(request), nil
+		fmt.Printf("[ValidateSemanticActivity] ERROR: Validation failed: %v\n", err)
+		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 	
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("[ValidateSemanticActivity] WARNING: Parser returned %d: %s, using basic validation\n", resp.StatusCode, string(body))
-		// For validation, we can use basic validation as it's not critical
-		return performBasicSemanticValidation(request), nil
+	// Convert validation result to semantic issues
+	semanticIssues := []types.Issue{}
+	for _, issue := range validationResult.Issues {
+		semanticIssues = append(semanticIssues, types.Issue{
+			Type:    issue.Type,
+			Message: issue.Message,
+			Line:    issue.Line,
+			Column:  0,
+		})
 	}
-	defer resp.Body.Close()
-
-	var parserResult map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&parserResult); err != nil {
-		return performBasicSemanticValidation(request), nil
-	}
-
-	// Analyze parser results
-	issues := []types.Issue{}
-	valid := true
-
-	if errors, ok := parserResult["errors"].([]interface{}); ok && len(errors) > 0 {
-		valid = false
-		for _, err := range errors {
-			if errMap, ok := err.(map[string]interface{}); ok {
-				// Safely extract message
-				message := "Unknown error"
-				if msg, ok := errMap["message"].(string); ok {
-					message = msg
-				}
-				
-				// Safely extract line number
-				line := 0
-				if lineNum, ok := errMap["line"].(float64); ok {
-					line = int(lineNum)
-				}
-				
-				issues = append(issues, types.Issue{
-					Type:    "error",
-					Message: message,
-					Line:    line,
-				})
-			}
-		}
-	}
-
-	// Safely extract AST if present
-	var ast string
-	if astValue, ok := parserResult["ast"]; ok && astValue != nil {
-		if astStr, ok := astValue.(string); ok {
-			ast = astStr
-		}
-	}
-
+	
+	// Calculate complexity for additional metrics
+	complexity := validator.CalculateComplexity(request.Code)
+	
+	// Log validation results
+	fmt.Printf("[ValidateSemanticActivity] Validation complete: valid=%v, score=%.2f, issues=%d, complexity=%d\n",
+		validationResult.Valid, validationResult.Score, len(semanticIssues), complexity)
+	
+	// Return the validation result
 	return &SemanticValidationResult{
-		Valid:  valid,
-		Issues: issues,
-		AST:    ast,
+		Valid:  validationResult.Valid,
+		Issues: semanticIssues,
+		AST:    fmt.Sprintf("Complexity: %d, Score: %.2f", complexity, validationResult.Score),
 	}, nil
 }
 
@@ -212,42 +162,98 @@ type FeedbackLoopResult struct {
 	Iterations   int    `json:"iterations"`
 }
 
-// ApplyFeedbackLoopActivity attempts to fix code based on validation issues
+// ApplyFeedbackLoopActivity attempts to fix code based on validation issues with multiple iterations
 func ApplyFeedbackLoopActivity(ctx context.Context, request FeedbackLoopRequest) (*FeedbackLoopResult, error) {
-	issuesDescription := ""
-	for _, issue := range request.Issues {
-		issuesDescription += fmt.Sprintf("- Line %d: %s (%s)\n", issue.Line, issue.Message, issue.Type)
-	}
+	maxIterations := 5
+	currentCode := request.Code
+	validator := NewQualityValidator()
+	
+	for iteration := 1; iteration <= maxIterations; iteration++ {
+		fmt.Printf("[FeedbackLoop] Iteration %d/%d - Attempting to improve code\n", iteration, maxIterations)
+		
+		// Build detailed feedback prompt
+		issuesDescription := ""
+		for _, issue := range request.Issues {
+			issuesDescription += fmt.Sprintf("- Line %d: %s (%s)\n", issue.Line, issue.Message, issue.Type)
+		}
+		
+		// Create enhancement prompt with specific requirements
+		fixPrompt := fmt.Sprintf(`You are an expert %s developer. Fix and enhance the following code to meet enterprise standards.
 
-	fixPrompt := fmt.Sprintf(`Fix the following %s code based on these issues:
-
-Issues found:
+CRITICAL ISSUES TO FIX:
 %s
 
-Original code:
+REQUIREMENTS:
+- Minimum 500 characters of functional code
+- At least 3 functions/methods with proper implementation
+- Comprehensive error handling
+- Input validation
+- Proper logging
+- Type hints/annotations where applicable
+- Security best practices
+- No placeholder code (no "Hello World", no "TODO", no "pass")
+- Production-ready implementation
+
+CURRENT CODE:
 %s
 
-Provide the corrected code that addresses all the issues.`, request.Language, issuesDescription, request.Code)
+Provide ONLY the complete, corrected, production-ready code. Do not include explanations.`, 
+			request.Language, issuesDescription, currentCode)
 
-	llmRequest := LLMGenerationRequest{
-		Prompt:    fixPrompt,
-		System:    "You are a code fixing expert. Fix the provided code to resolve all issues while maintaining functionality.",
-		Language:  request.Language,
-		Provider:  "azure",
-		MaxTokens: 4000,
+		llmRequest := LLMGenerationRequest{
+			Prompt:    fixPrompt,
+			System:    "You are an expert software engineer specializing in writing production-ready, enterprise-grade code. Generate complete, functional implementations with proper error handling, validation, and best practices.",
+			Language:  request.Language,
+			Provider:  "azure",
+			MaxTokens: 8000, // Increase for more comprehensive code
+		}
+
+		llmResult, err := GenerateCodeActivity(ctx, llmRequest)
+		if err != nil {
+			fmt.Printf("[FeedbackLoop] Iteration %d failed to generate: %v\n", iteration, err)
+			continue
+		}
+		
+		improvedCode := llmResult.Content
+		
+		// Validate the improved code
+		validationResult, _ := validator.ValidateEnterpriseCode(ctx, improvedCode, request.Language)
+		
+		fmt.Printf("[FeedbackLoop] Iteration %d validation: score=%.2f, valid=%v, issues=%d\n", 
+			iteration, validationResult.Score, validationResult.Valid, len(validationResult.Issues))
+		
+		// If code is good enough, return it
+		if validationResult.Valid && validationResult.Score >= 70 {
+			fmt.Printf("[FeedbackLoop] SUCCESS: Code improved after %d iterations (score: %.2f)\n", iteration, validationResult.Score)
+			return &FeedbackLoopResult{
+				ImprovedCode: improvedCode,
+				Iterations:   iteration,
+			}, nil
+		}
+		
+		// Update issues for next iteration
+		request.Issues = []types.Issue{}
+		for _, issue := range validationResult.Issues {
+			request.Issues = append(request.Issues, types.Issue{
+				Type:    issue.Type,
+				Message: issue.Message,
+				Line:    issue.Line,
+			})
+		}
+		
+		// Update current code for next iteration
+		if len(improvedCode) > len(currentCode) {
+			currentCode = improvedCode // Use improved version if it's longer
+		}
+		
+		// Add exponential backoff
+		time.Sleep(time.Duration(iteration) * time.Second)
 	}
-
-	llmResult, err := GenerateCodeActivity(ctx, llmRequest)
-	if err != nil {
-		return &FeedbackLoopResult{
-			ImprovedCode: request.Code,
-			Iterations:   0,
-		}, nil
-	}
-
+	
+	fmt.Printf("[FeedbackLoop] WARNING: Failed to improve code after %d iterations\n", maxIterations)
 	return &FeedbackLoopResult{
-		ImprovedCode: llmResult.Content,
-		Iterations:   1,
+		ImprovedCode: currentCode,
+		Iterations:   maxIterations,
 	}, nil
 }
 

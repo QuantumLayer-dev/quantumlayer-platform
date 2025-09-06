@@ -1,0 +1,30 @@
+# QuantumLayer Platform Version Manifest
+# Version: 2.5.0
+# Built: 20250905-234332
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-version
+  namespace: quantumlayer
+data:
+  version: "2.5.0"
+  build_date: "20250905-234332"
+  images: |
+    - ghcr.io/quantumlayer-dev/agent-orchestrator:2.5.0
+    - ghcr.io/quantumlayer-dev/parser:2.5.0
+    - ghcr.io/quantumlayer-dev/meta-prompt-engine:2.5.0
+    - ghcr.io/quantumlayer-dev/sandbox-executor:2.5.0
+    - ghcr.io/quantumlayer-dev/capsule-builder:2.5.0
+    - ghcr.io/quantumlayer-dev/quantum-capsule:2.5.0
+    - ghcr.io/quantumlayer-dev/quantum-drops:2.5.0
+    - ghcr.io/quantumlayer-dev/mcp-gateway:2.5.0
+    - ghcr.io/quantumlayer-dev/qinfra:2.5.0
+    - ghcr.io/quantumlayer-dev/qtest:2.5.0
+    - ghcr.io/quantumlayer-dev/workflow-api:2.5.0
+    - ghcr.io/quantumlayer-dev/deployment-manager:2.5.0
+    - ghcr.io/quantumlayer-dev/preview-service:2.5.0
+    - ghcr.io/quantumlayer-dev/image-registry:2.5.0
+    - ghcr.io/quantumlayer-dev/qinfra-ai:2.5.0
+    - ghcr.io/quantumlayer-dev/cve-tracker:2.5.0
+    - ghcr.io/quantumlayer-dev/web-ui:2.5.0

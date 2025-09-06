@@ -52,6 +52,7 @@ func CodeGenerationWorkflow(ctx workflow.Context, request types.CodeGenerationRe
 	enhanceRequest := types.PromptEnhancementRequest{
 		OriginalPrompt: request.Prompt,
 		Type:           request.Type,
+		Language:       request.Language,
 		Context:        request.Context,
 		TargetProvider: getPreferredProvider(request.Preferences.Providers),
 	}

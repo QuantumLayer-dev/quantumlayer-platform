@@ -10,11 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	// "github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/api"
+	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/api"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/engine"
 	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/meta-prompt-engine/internal/templates"
-	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/config"
-	"github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -25,27 +23,21 @@ func main() {
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logger.SetLevel(logrus.InfoLevel)
 
-	// Load configuration
-	cfg, err := config.Load("meta-prompt-engine")
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to load configuration")
+	// Load configuration from environment
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
 	}
 
-	// Initialize telemetry
-	tracer, cleanup, err := telemetry.InitTracer(
-		"meta-prompt-engine",
-		cfg.Tracing.Endpoint,
-		cfg.Tracing.SamplingRate,
-	)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to initialize telemetry")
+	// LLM Router URL from environment or default
+	llmRouterURL := os.Getenv("LLM_ROUTER_URL")
+	if llmRouterURL == "" {
+		llmRouterURL = "http://llm-router.quantumlayer.svc.cluster.local:8080"
 	}
-	defer cleanup()
-	_ = tracer // Will be used later
 
 	// Create real LLM client pointing to LLM Router service
-	llmClient := engine.NewRealLLMClient("", logger)
-	logger.Info("Using real LLM Router client")
+	llmClient := engine.NewRealLLMClient(llmRouterURL, logger)
+	logger.WithField("url", llmRouterURL).Info("Using real LLM Router client")
 
 	// Initialize Meta Prompt Engine
 	metaEngine := engine.NewMetaPromptEngine(llmClient, logger)
@@ -64,13 +56,13 @@ func main() {
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    fmt.Sprintf(":%s", port),
 		Handler: router,
 	}
 
 	// Start server in goroutine
 	go func() {
-		logger.WithField("port", cfg.Server.Port).Info("Starting Meta Prompt Engine server")
+		logger.WithField("port", port).Info("Starting Meta Prompt Engine server")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.WithError(err).Fatal("Failed to start server")
 		}
@@ -111,17 +103,35 @@ func setupRouter(engine *engine.MetaPromptEngine, logger *logrus.Logger) *gin.En
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 
-	// API routes - TODO: Implement API handlers
+	// CRITICAL: Main enhancement endpoint expected by workflows
+	router.POST("/enhance", api.EnhanceHandler(engine, logger))
+	
+	// API routes v1
 	v1 := router.Group("/api/v1")
 	{
-		// Placeholder endpoint
+		// Status endpoint
 		v1.GET("/status", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"service": "meta-prompt-engine",
-				"version": "1.0.0",
+				"version": "2.5.1",
 				"status": "operational",
+				"features": []string{
+					"prompt_enhancement",
+					"template_system",
+					"optimization",
+					"metrics",
+				},
 			})
 		})
+		
+		// Enhancement endpoint (v1 version)
+		v1.POST("/enhance", api.EnhanceHandler(engine, logger))
+		
+		// Template management
+		v1.GET("/templates", api.TemplateHandler(engine, logger))
+		
+		// Metrics and monitoring
+		v1.GET("/metrics", api.MetricsHandler(engine, logger))
 		
 		// Template management - TODO
 		// v1.POST("/templates", api.RegisterTemplate(engine))

@@ -27,6 +27,7 @@ type MetaPromptEngine struct {
 	tracer        trace.Tracer
 	llmClient     LLMClient
 	optimizer     *PromptOptimizer
+	metrics       *Metrics
 }
 
 // LLMClient interface for LLM interactions
@@ -45,7 +46,22 @@ func NewMetaPromptEngine(llmClient LLMClient, logger *logrus.Logger) *MetaPrompt
 		tracer:     otel.Tracer("meta-prompt-engine"),
 		llmClient:  llmClient,
 		optimizer:  NewPromptOptimizer(logger),
+		metrics:    NewMetrics(),
 	}
+}
+
+// ListTemplates returns a list of all registered templates
+func (e *MetaPromptEngine) ListTemplates() []string {
+	templateList := make([]string, 0, len(e.templates))
+	for name := range e.templates {
+		templateList = append(templateList, name)
+	}
+	return templateList
+}
+
+// GetMetrics returns current performance metrics
+func (e *MetaPromptEngine) GetMetrics() *Metrics {
+	return e.metrics.GetSnapshot()
 }
 
 // RegisterTemplate registers a new prompt template

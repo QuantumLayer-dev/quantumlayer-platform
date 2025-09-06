@@ -5,19 +5,19 @@ FROM golang:1.22-alpine AS builder
 RUN apk add --no-cache git
 
 # Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod and sum files
-COPY go.mod go.sum ./
+# Copy go mod and sum files from packages/llm-router
+COPY packages/llm-router/go.mod packages/llm-router/go.sum ./
 
 # Download dependencies
-RUN go mod download
+RUN go mod download || go mod tidy
 
-# Copy source code
-COPY . .
+# Copy the llm-router package source
+COPY packages/llm-router ./
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o llm-router ./cmd/main.go
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -o llm-router ./cmd/main.go
 
 # Final stage
 FROM alpine:latest
@@ -33,7 +33,7 @@ RUN addgroup -g 1000 -S llmrouter && \
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/llm-router .
+COPY --from=builder /build/llm-router .
 
 # Change ownership
 RUN chown -R llmrouter:llmrouter /app

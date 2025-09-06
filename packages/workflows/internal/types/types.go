@@ -72,18 +72,21 @@ type WorkflowState struct {
 
 // PromptEnhancementRequest for Meta Prompt Engine
 type PromptEnhancementRequest struct {
-	OriginalPrompt string            `json:"originalPrompt"`
+	OriginalPrompt string            `json:"original_prompt"`
 	Type           string            `json:"type"`
+	Language       string            `json:"language,omitempty"`
 	Context        map[string]string `json:"context"`
-	TargetProvider string            `json:"targetProvider"`
+	TargetProvider string            `json:"targetProvider,omitempty"`
 }
 
 // PromptEnhancementResult from Meta Prompt Engine
 type PromptEnhancementResult struct {
-	EnhancedPrompt string   `json:"enhancedPrompt"`
-	SystemPrompt   string   `json:"systemPrompt"`
+	EnhancedPrompt string   `json:"enhanced_prompt"`
+	SystemPrompt   string   `json:"system_prompt"`
 	Examples       []string `json:"examples,omitempty"`
 	Tokens         int      `json:"tokens"`
+	Improvements   []string `json:"improvements"`
+	TemplateUsed   string   `json:"template_used"`
 }
 
 // ValidationRequest for code validation
@@ -139,7 +142,7 @@ type QuantumDrop struct {
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// ExtendedGenerationResult for the 12-stage workflow
+// ExtendedGenerationResult for the enhanced workflow with deployment capabilities
 type ExtendedGenerationResult struct {
 	ID                 string              `json:"id"`
 	RequestID          string              `json:"requestId"`
@@ -161,6 +164,11 @@ type ExtendedGenerationResult struct {
 	Errors             []string            `json:"errors,omitempty"`
 	CompletedAt        time.Time           `json:"completedAt"`
 	PreviewURL         string              `json:"previewUrl,omitempty"`
+	// Deployment information
+	LiveURL            string              `json:"liveUrl,omitempty"`
+	DashboardURL       string              `json:"dashboardUrl,omitempty"`
+	DeploymentID       string              `json:"deploymentId,omitempty"`
+	ExpiresAt          *time.Time          `json:"expiresAt,omitempty"`
 }
 
 // ValidationResults aggregates all validation scores

@@ -3,16 +3,16 @@ FROM golang:1.21-alpine AS builder
 
 RUN apk add --no-cache git
 
-WORKDIR /app
+WORKDIR /build
 
-# Copy go mod files
-COPY go.mod ./
+# Copy entire project for build context
+COPY . .
 
-# Copy source code
-COPY . ./
+# Move to workflows directory
+WORKDIR /build/packages/workflows
 
 # Download dependencies and build
-RUN go mod tidy && \
+RUN go mod download && \
     CGO_ENABLED=0 GOOS=linux go build -o worker ./cmd/worker/main.go
 
 # Final stage
@@ -22,7 +22,7 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-COPY --from=builder /app/worker .
+COPY --from=builder /build/packages/workflows/worker .
 
 EXPOSE 9090
 

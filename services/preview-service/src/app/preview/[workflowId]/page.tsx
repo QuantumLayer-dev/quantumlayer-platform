@@ -42,7 +42,7 @@ export default function PreviewPage() {
   const workflowId = params.workflowId as string
   
   const [capsuleData, setCapsuleData] = useState<CapsuleData | null>(null)
-  const [selectedFile, setSelectedFile] = useState<string>('main.py')
+  const [selectedFile, setSelectedFile] = useState<string>('')
   const [fileContent, setFileContent] = useState<string>('')
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null)
@@ -56,39 +56,71 @@ export default function PreviewPage() {
 
   const loadCapsuleData = async () => {
     try {
-      // First get the QuantumDrops
+      // Get the QuantumDrops with transformed files
       const dropsResponse = await fetch(`/api/capsules/${workflowId}/drops`)
       const dropsData = await dropsResponse.json()
       
-      // Find the code drop
-      const codeDrop = dropsData.drops?.find((d: any) => d.type === 'code')
-      if (!codeDrop) {
-        toast.error('No code found for this workflow')
+      // Use the transformed files directly instead of building a capsule
+      if (!dropsData.files || Object.keys(dropsData.files).length === 0) {
+        toast.error('No code files found for this workflow')
         return
       }
 
-      // Build a capsule from the code
-      const capsuleResponse = await fetch('/api/capsule/v1/build', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow_id: workflowId,
-          name: 'preview-app',
-          type: 'application',
-          language: 'python', // TODO: Get from workflow
-          code: codeDrop.artifact
-        })
+      // Create capsule structure from the files
+      const capsuleStructure: { [key: string]: CapsuleFile } = {}
+      let detectedLanguage = 'python' // default
+      let primaryFile = 'main.py' // default
+      
+      // Convert files to capsule structure
+      Object.entries(dropsData.files).forEach(([path, fileData]: [string, any]) => {
+        capsuleStructure[path] = {
+          path,
+          content: fileData.content,
+          type: 'source'
+        }
+        
+        // Try to detect the primary language and file
+        if (fileData.language && fileData.language !== 'plaintext' && fileData.language !== 'markdown') {
+          detectedLanguage = fileData.language
+        }
+        
+        // Find a reasonable primary file to display - prioritize src/ directory
+        if (path.match(/src\/main\.(py|js|ts|go|java|cpp|c|rs)$/)) {
+          primaryFile = path
+        } else if (path.match(/src\/.*\.(py|js|ts|go|java|cpp|c|rs)$/) && !primaryFile.match(/src\//)) {
+          primaryFile = path
+        } else if (path.match(/main\.(py|js|ts|go|java|cpp|c|rs)$/) && !primaryFile.match(/src\//)) {
+          // Only use root main.py if no src/ files found
+          const mainContent = fileData.content
+          if (mainContent && !mainContent.startsWith('Hi!') && mainContent.length > 50) {
+            primaryFile = path
+          }
+        } else if (path.match(/\.(py|js|ts|go|java|cpp|c|rs)$/) && !primaryFile.match(/\.(py|js|ts|go|java|cpp|c|rs)$/)) {
+          primaryFile = path
+        }
       })
       
-      const capsule = await capsuleResponse.json()
-      setCapsuleData(capsule)
-      
-      // Set initial file content
-      if (capsule.structure['main.py']) {
-        setFileContent(capsule.structure['main.py'].content)
+      const capsule: CapsuleData = {
+        id: workflowId,
+        name: `preview-${workflowId.substring(0, 8)}`,
+        language: detectedLanguage,
+        structure: capsuleStructure,
+        metadata: {
+          workflowId,
+          generatedAt: new Date().toISOString(),
+          totalFiles: Object.keys(capsuleStructure).length
+        }
       }
       
-      toast.success('Project loaded successfully')
+      setCapsuleData(capsule)
+      setSelectedFile(primaryFile)
+      
+      // Set initial file content
+      if (capsule.structure[primaryFile]) {
+        setFileContent(capsule.structure[primaryFile].content)
+      }
+      
+      toast.success(`Project loaded successfully - ${Object.keys(capsuleStructure).length} files`)
     } catch (error) {
       console.error('Error loading capsule:', error)
       toast.error('Failed to load project')

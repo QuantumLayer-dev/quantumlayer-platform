@@ -46,6 +46,7 @@ func main() {
 	// Register workflows
 	w.RegisterWorkflow(workflows.CodeGenerationWorkflow)
 	w.RegisterWorkflow(workflows.ExtendedCodeGenerationWorkflow) // New extended workflow
+	w.RegisterWorkflow(workflows.IntelligentCodeGenerationWorkflow) // Intelligent workflow v2
 
 	// Register activities - original
 	w.RegisterActivity(activities.EnhancePromptActivity)
@@ -67,9 +68,18 @@ func main() {
 	w.RegisterActivity(activities.GenerateReadmeActivity)
 	w.RegisterActivity(activities.StoreQuantumDropActivity)
 	
+	// Register intelligent code generation
+	w.RegisterActivity(activities.GenerateIntelligentCodeActivity)
+	
 	// Register preview activities
 	w.RegisterActivity(activities.GeneratePreviewActivity)
 	w.RegisterActivity(activities.StorePreviewMetadataActivity)
+	
+	// Register deployment activities
+	w.RegisterActivity(activities.BuildContainerImageActivity)
+	w.RegisterActivity(activities.GenerateK8sManifestsActivity)
+	w.RegisterActivity(activities.DeployToKubernetesActivity)
+	w.RegisterActivity(activities.HealthCheckActivity)
 
 	logger.Info("Starting Temporal worker",
 		zap.String("taskQueue", workflows.CodeGenerationTaskQueue),

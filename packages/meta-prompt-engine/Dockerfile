@@ -8,12 +8,8 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /build
 
-# Copy all required files
-COPY packages/meta-prompt-engine/ ./
-COPY packages/shared/ ./shared/
-
-# Fix module replacement
-RUN go mod edit -replace github.com/QuantumLayer-dev/quantumlayer-platform/packages/shared=./shared
+# Copy all source files
+COPY . ./
 
 # Download dependencies
 RUN go mod download
@@ -27,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
     -o server \
-    cmd/server/main.go
+    ./cmd/server
 
 # Final production image
 FROM gcr.io/distroless/static:nonroot
