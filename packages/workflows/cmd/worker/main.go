@@ -80,6 +80,16 @@ func main() {
 	w.RegisterActivity(activities.GenerateK8sManifestsActivity)
 	w.RegisterActivity(activities.DeployToKubernetesActivity)
 	w.RegisterActivity(activities.HealthCheckActivity)
+	
+	// Register enterprise auto-deployment activities
+	w.RegisterActivity(activities.UniversalDeploymentActivity)
+	w.RegisterActivity(activities.KanikoDeploymentActivity)
+	w.RegisterActivity(activities.MultiCloudOrchestratorActivity)
+	w.RegisterActivity(activities.EnterpriseMonitoringActivity)
+	w.RegisterActivity(activities.SecurityComplianceActivity)
+	w.RegisterActivity(activities.ErrorRecoveryActivity)
+	w.RegisterActivity(activities.FallbackHandlerActivity)
+	w.RegisterActivity(activities.QualityValidatorActivity)
 
 	logger.Info("Starting Temporal worker",
 		zap.String("taskQueue", workflows.CodeGenerationTaskQueue),

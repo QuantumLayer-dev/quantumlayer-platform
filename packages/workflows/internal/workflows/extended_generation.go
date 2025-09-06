@@ -579,147 +579,179 @@ func ExtendedCodeGenerationWorkflow(ctx workflow.Context, request types.CodeGene
 		logger.Warn("Failed to store final QuantumDrop", "error", err)
 	}
 
-	// Stage 13: Container Build and Registry Push
-	logger.Info("Stage 13: Building and pushing container image")
-	deploymentRequest := activities.DeploymentRequest{
+	// Stage 13: Enterprise Universal Deployment
+	logger.Info("Stage 13: Enterprise Universal Deployment (Kaniko + Multi-Cloud)")
+	deploymentRequest := activities.UniversalDeploymentRequest{
 		WorkflowID:   result.ID,
-		CapsuleID:    result.RequestID,
+		ProjectName:  fmt.Sprintf("%s-%s", request.Type, request.Language),
 		Language:     request.Language,
 		Framework:    request.Framework,
 		Files:        convertFilesToMap(result.Files),
 		Dependencies: result.Dependencies,
-		Environment:  request.Context,
-		Resources: activities.ContainerResources{
+		Resources: activities.DeploymentResources{
 			CPU:    "200m",
 			Memory: "256Mi",
 		},
-		TTLMinutes: 60, // Default 1 hour
+		Strategy: activities.DeploymentStrategy{
+			PreferredProviders: []string{"kubernetes", "kaniko"},
+			FallbackEnabled:    true,
+			SecurityLevel:      "standard",
+		},
+		TTLMinutes: 120, // Enterprise default: 2 hours
 	}
 	
-	var containerResult activities.ContainerBuildResult
-	// Extended timeout for container build (Docker build + push)
-	containerCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 10 * time.Minute,
+	var deploymentResult activities.UniversalDeploymentResult
+	// Extended timeout for enterprise deployment
+	enterpriseCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: 15 * time.Minute,
 	})
-	err = workflow.ExecuteActivity(containerCtx, activities.BuildContainerImageActivity, deploymentRequest).Get(ctx, &containerResult)
+	err = workflow.ExecuteActivity(enterpriseCtx, activities.UniversalDeploymentActivity, deploymentRequest).Get(ctx, &deploymentResult)
 	if err != nil {
-		logger.Warn("Container build failed", "error", err)
+		logger.Warn("Enterprise deployment failed", "error", err)
 		// Continue without deployment but mark as partially successful
 	} else {
-		logger.Info("Container built successfully", "image", containerResult.ImageName+":"+containerResult.ImageTag)
+		logger.Info("Enterprise deployment successful", 
+			"strategy", deploymentResult.UsedStrategy,
+			"provider", deploymentResult.Provider,
+			"live_url", deploymentResult.LiveURL)
 		
-		// Create container build QuantumDrop
+		// Store deployment information in result
+		result.LiveURL = deploymentResult.LiveURL
+		result.DashboardURL = deploymentResult.DashboardURL
+		result.DeploymentID = deploymentResult.DeploymentID
+		result.ExpiresAt = &deploymentResult.ExpiresAt
+		
+		// Create enterprise deployment QuantumDrop
 		drop := types.QuantumDrop{
-			ID:        fmt.Sprintf("drop-%s-container", request.ID),
-			Stage:     "container_build",
+			ID:        fmt.Sprintf("drop-%s-enterprise-deployment", request.ID),
+			Stage:     "enterprise_deployment",
 			Timestamp: workflow.Now(ctx),
-			Artifact:  fmt.Sprintf("Container built: %s:%s (%.2fs)", containerResult.ImageName, containerResult.ImageTag, containerResult.BuildTime),
-			Type:      "container",
+			Artifact:  fmt.Sprintf("🚀 Enterprise Deployed: %s via %s (expires: %s)", deploymentResult.LiveURL, deploymentResult.Provider, deploymentResult.ExpiresAt.Format("2006-01-02 15:04:05")),
+			Type:      "deployment",
 			WorkflowID: result.ID,
 			Metadata: map[string]interface{}{
-				"image_name": containerResult.ImageName,
-				"image_tag":  containerResult.ImageTag,
-				"build_time": containerResult.BuildTime,
-				"image_size": containerResult.ImageSize,
+				"live_url":        deploymentResult.LiveURL,
+				"dashboard_url":   deploymentResult.DashboardURL,
+				"deployment_id":   deploymentResult.DeploymentID,
+				"provider":        deploymentResult.Provider,
+				"strategy":        deploymentResult.UsedStrategy,
+				"security_score":  deploymentResult.SecurityScore,
+				"expires_at":      deploymentResult.ExpiresAt,
+				"container_image": deploymentResult.ContainerImage,
 			},
 		}
 		result.QuantumDrops = append(result.QuantumDrops, drop)
 		
-		// Store the container QuantumDrop
+		// Store the deployment QuantumDrop
 		err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
 		if err != nil {
-			logger.Warn("Failed to store container QuantumDrop", "error", err)
+			logger.Warn("Failed to store deployment QuantumDrop", "error", err)
 		}
 	}
 
-	// Stage 14: Kubernetes Deployment
-	if containerResult.Success {
-		logger.Info("Stage 14: Deploying to Kubernetes")
+	// Stage 14: Enterprise Security & Compliance
+	if deploymentResult.Success {
+		logger.Info("Stage 14: Enterprise Security & Compliance Validation")
+		securityRequest := activities.SecurityComplianceRequest{
+			DeploymentID:    result.DeploymentID,
+			ContainerImage:  deploymentResult.ContainerImage,
+			LiveURL:         result.LiveURL,
+			ComplianceLevel: "SOC2",
+			SecurityChecks:  []string{"container_scan", "runtime_analysis", "network_security"},
+		}
 		
-		// Generate Kubernetes manifests
-		var k8sManifest string
-		err = workflow.ExecuteActivity(ctx, activities.GenerateK8sManifestsActivity, deploymentRequest, containerResult.ImageTag).Get(ctx, &k8sManifest)
+		var securityResult activities.SecurityComplianceResult
+		err = workflow.ExecuteActivity(enterpriseCtx, activities.SecurityComplianceActivity, securityRequest).Get(ctx, &securityResult)
 		if err != nil {
-			logger.Warn("K8s manifest generation failed", "error", err)
+			logger.Warn("Security compliance check failed", "error", err)
 		} else {
-			// Deploy to Kubernetes
-			var deployResult activities.KubernetesDeploymentResult
-			deployCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-				StartToCloseTimeout: 5 * time.Minute,
-			})
-			err = workflow.ExecuteActivity(deployCtx, activities.DeployToKubernetesActivity, deploymentRequest, k8sManifest, containerResult.ImageTag).Get(ctx, &deployResult)
-			if err != nil {
-				logger.Warn("Kubernetes deployment failed", "error", err)
-			} else {
-				logger.Info("Successfully deployed to Kubernetes", "live_url", deployResult.LiveURL)
-				
-				// Store deployment information in result
-				result.LiveURL = deployResult.LiveURL
-				result.DashboardURL = deployResult.DashboardURL
-				result.DeploymentID = deployResult.DeploymentID
-				result.ExpiresAt = &deployResult.ExpiresAt
-				
-				// Create deployment QuantumDrop
-				drop := types.QuantumDrop{
-					ID:        fmt.Sprintf("drop-%s-deployment", request.ID),
-					Stage:     "kubernetes_deployment",
-					Timestamp: workflow.Now(ctx),
-					Artifact:  fmt.Sprintf("Deployed: %s (expires: %s)", deployResult.LiveURL, deployResult.ExpiresAt.Format("2006-01-02 15:04:05")),
-					Type:      "deployment",
-					WorkflowID: result.ID,
-					Metadata: map[string]interface{}{
-						"live_url":      deployResult.LiveURL,
-						"dashboard_url": deployResult.DashboardURL,
-						"deployment_id": deployResult.DeploymentID,
-						"namespace":     deployResult.Namespace,
-						"expires_at":    deployResult.ExpiresAt,
-					},
-				}
-				result.QuantumDrops = append(result.QuantumDrops, drop)
-				
-				// Store the deployment QuantumDrop
-				err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
-				if err != nil {
-					logger.Warn("Failed to store deployment QuantumDrop", "error", err)
-				}
-			}
-		}
-	}
-
-	// Stage 15: Health Check and Live URL Verification
-	if result.LiveURL != "" {
-		logger.Info("Stage 15: Performing health check on live deployment")
-		
-		var healthOK bool
-		healthCtx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-			StartToCloseTimeout: 5 * time.Minute, // Allow time for deployment to come up
-		})
-		err = workflow.ExecuteActivity(healthCtx, activities.HealthCheckActivity, result.LiveURL, 30).Get(ctx, &healthOK) // 30 attempts = 5 minutes
-		if err != nil {
-			logger.Warn("Health check failed", "error", err)
-		} else if healthOK {
-			logger.Info("Health check passed - application is live!", "url", result.LiveURL)
+			logger.Info("Security compliance completed", 
+				"score", securityResult.ComplianceScore,
+				"vulnerabilities", len(securityResult.Vulnerabilities),
+				"compliant", securityResult.Compliant)
 			
-			// Create health check QuantumDrop
+			// Store security results
+			result.ValidationResults.SecurityScore = float64(securityResult.ComplianceScore)
+			result.SecurityReport = securityResult.Report
+			
+			// Create security QuantumDrop
 			drop := types.QuantumDrop{
-				ID:        fmt.Sprintf("drop-%s-health", request.ID),
-				Stage:     "health_check",
+				ID:        fmt.Sprintf("drop-%s-security", request.ID),
+				Stage:     "security_compliance",
 				Timestamp: workflow.Now(ctx),
-				Artifact:  fmt.Sprintf("✅ Application is live and healthy at %s", result.LiveURL),
-				Type:      "health",
+				Artifact:  fmt.Sprintf("🛡️ Security Score: %d/100, Compliant: %v", securityResult.ComplianceScore, securityResult.Compliant),
+				Type:      "security",
 				WorkflowID: result.ID,
 				Metadata: map[string]interface{}{
-					"health_status": "healthy",
-					"live_url":      result.LiveURL,
-					"verified_at":   workflow.Now(ctx),
+					"compliance_score": securityResult.ComplianceScore,
+					"compliant":        securityResult.Compliant,
+					"vulnerabilities":  len(securityResult.Vulnerabilities),
+					"scans_performed":  securityResult.ScansPerformed,
 				},
 			}
 			result.QuantumDrops = append(result.QuantumDrops, drop)
 			
-			// Store the health check QuantumDrop
+			// Store the security QuantumDrop
 			err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
 			if err != nil {
-				logger.Warn("Failed to store health QuantumDrop", "error", err)
+				logger.Warn("Failed to store security QuantumDrop", "error", err)
+			}
+		}
+	}
+
+	// Stage 15: Enterprise Monitoring & Observability
+	if result.LiveURL != "" {
+		logger.Info("Stage 15: Deploying Enterprise Monitoring & Observability Stack")
+		
+		monitoringRequest := activities.EnterpriseMonitoringRequest{
+			DeploymentID: result.DeploymentID,
+			LiveURL:      result.LiveURL,
+			ProjectName:  fmt.Sprintf("%s-%s", request.Type, request.Language),
+			MonitoringConfig: activities.MonitoringConfig{
+				MetricsEnabled:    true,
+				LoggingEnabled:    true,
+				TracingEnabled:    true,
+				AlertsEnabled:     true,
+				DashboardEnabled:  true,
+				SLOMonitoring:     true,
+			},
+		}
+		
+		var monitoringResult activities.EnterpriseMonitoringResult
+		err = workflow.ExecuteActivity(enterpriseCtx, activities.EnterpriseMonitoringActivity, monitoringRequest).Get(ctx, &monitoringResult)
+		if err != nil {
+			logger.Warn("Enterprise monitoring setup failed", "error", err)
+		} else {
+			logger.Info("Enterprise monitoring deployed", 
+				"dashboard_url", monitoringResult.DashboardURL,
+				"metrics_endpoint", monitoringResult.MetricsEndpoint,
+				"health_status", monitoringResult.HealthStatus)
+			
+			// Update result with monitoring URLs
+			result.DashboardURL = monitoringResult.DashboardURL
+			
+			// Create monitoring QuantumDrop
+			drop := types.QuantumDrop{
+				ID:        fmt.Sprintf("drop-%s-monitoring", request.ID),
+				Stage:     "enterprise_monitoring",
+				Timestamp: workflow.Now(ctx),
+				Artifact:  fmt.Sprintf("📊 360° Monitoring Active: %s (Health: %s)", monitoringResult.DashboardURL, monitoringResult.HealthStatus),
+				Type:      "monitoring",
+				WorkflowID: result.ID,
+				Metadata: map[string]interface{}{
+					"dashboard_url":     monitoringResult.DashboardURL,
+					"metrics_endpoint":  monitoringResult.MetricsEndpoint,
+					"health_status":     monitoringResult.HealthStatus,
+					"slo_status":        monitoringResult.SLOStatus,
+					"alerts_configured": monitoringResult.AlertsConfigured,
+				},
+			}
+			result.QuantumDrops = append(result.QuantumDrops, drop)
+			
+			// Store the monitoring QuantumDrop
+			err = workflow.ExecuteActivity(ctx, activities.StoreQuantumDropActivity, drop).Get(ctx, nil)
+			if err != nil {
+				logger.Warn("Failed to store monitoring QuantumDrop", "error", err)
 			}
 		}
 	}
